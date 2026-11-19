@@ -1,0 +1,8 @@
+work/
+output/
+uploads/
+cache/
+settings.json
+cookies.txt
+server.log
+__pycache__/

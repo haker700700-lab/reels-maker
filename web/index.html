@@ -1,0 +1,453 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0f1020">
+<meta name="color-scheme" content="dark">
+<link rel="manifest" href="/manifest.json">
+<link rel="icon" href="/icon-192.png">
+<link rel="apple-touch-icon" href="/icon-192.png">
+<title>صانع الريلز</title>
+<style>
+:root{--bg:#0f1020;--card:#181a30;--card2:#20233f;--line:#2c3058;--txt:#eef0ff;--mut:#9aa0c8;--acc:#7c5cff;--acc2:#ff4d8d;--ok:#22c55e;--warn:#f59e0b;--err:#ef4444}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg);color:var(--txt);font-family:"Noto Sans Arabic","Noto Naskh Arabic",Tahoma,Arial,sans-serif;font-size:16px;line-height:1.7}
+body{padding:env(safe-area-inset-top) 0 calc(96px + env(safe-area-inset-bottom))}
+.wrap{max-width:640px;margin:0 auto;padding:10px 12px}
+header{display:flex;align-items:center;gap:10px;padding:8px 2px}
+header h1{font-size:20px;margin:0;flex:1}
+.dot{width:11px;height:11px;border-radius:50%;background:var(--err);box-shadow:0 0 0 3px #ef444433}
+.dot.on{background:var(--ok);box-shadow:0 0 0 3px #22c55e33}
+.banner{background:#3a2a10;border:1px solid #7a5a1a;color:#ffd68a;border-radius:14px;padding:12px 14px;margin:8px 0;font-size:15px}
+.banner code{background:#00000055;padding:1px 8px;border-radius:8px;direction:ltr;display:inline-block}
+details.card,.panel{background:var(--card);border:1px solid var(--line);border-radius:18px;margin:10px 0;overflow:hidden}
+details.card>summary{list-style:none;cursor:pointer;padding:14px 16px;font-weight:700;display:flex;align-items:center;gap:8px;user-select:none}
+details.card>summary::-webkit-details-marker{display:none}
+details.card>summary::after{content:"▾";margin-inline-start:auto;color:var(--mut);transition:transform .2s}
+details.card[open]>summary::after{transform:rotate(180deg)}
+.body{padding:0 16px 16px}
+.panel{padding:14px 16px}
+label.f{display:block;margin:12px 0 4px;color:var(--mut);font-size:14px}
+.hint{color:var(--mut);font-size:13px;margin:4px 0 0}
+input[type=text],input[type=number],select,textarea{width:100%;background:var(--card2);color:var(--txt);border:1px solid var(--line);border-radius:12px;padding:12px;font:inherit;outline:none}
+input:focus,select:focus,textarea:focus{border-color:var(--acc)}
+input[readonly]{opacity:.85}
+textarea{min-height:84px;resize:vertical}
+.row{display:flex;gap:8px;align-items:stretch}
+.row>*{min-width:0}
+.row>input{flex:1}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.grid3 label.f{margin-top:8px}
+button{font:inherit;color:var(--txt);border:0;border-radius:12px;padding:11px 14px;background:var(--card2);border:1px solid var(--line);cursor:pointer}
+button:active{transform:scale(.98)}
+button.sm{padding:8px 12px;font-size:14px}
+button.big{width:100%;padding:15px;font-size:18px;font-weight:800;background:linear-gradient(135deg,var(--acc),var(--acc2));border:0;color:#fff}
+button.big:disabled{opacity:.5}
+button.red{background:#4a1c24;border-color:#7a2a36;color:#ffb4bd}
+.sw{display:flex;align-items:center;gap:12px;margin:14px 0 2px;cursor:pointer}
+.sw input{display:none}
+.tg{width:46px;height:26px;border-radius:26px;background:#3a3e66;position:relative;flex:none;transition:.2s}
+.tg::after{content:"";position:absolute;top:3px;inset-inline-start:3px;width:20px;height:20px;border-radius:50%;background:#fff;transition:.2s}
+.sw input:checked+.tg{background:var(--acc)}
+.sw input:checked+.tg::after{inset-inline-start:23px}
+.chip{display:inline-flex;align-items:center;gap:6px;background:var(--card2);border:1px solid var(--line);border-radius:20px;padding:4px 12px;font-size:13px;margin-top:6px}
+.rights{margin-top:14px;background:#1d2040;border:1px dashed var(--line);border-radius:14px;padding:10px 12px}
+.rights.shake{animation:sh .4s}
+@keyframes sh{20%,60%{transform:translateX(-6px)}40%,80%{transform:translateX(6px)}}
+.bar{position:fixed;inset-inline:0;bottom:0;padding:10px 12px calc(10px + env(safe-area-inset-bottom));background:linear-gradient(transparent,var(--bg) 35%);z-index:5}
+.bar .in{max-width:640px;margin:0 auto;display:flex;gap:8px}
+.prog{height:12px;background:var(--card2);border-radius:12px;overflow:hidden;margin:8px 0}
+.prog>i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--acc),var(--acc2));transition:width .4s}
+#msg{font-size:15px;color:var(--txt)}
+#log{max-height:240px;overflow:auto;margin-top:8px;font-size:13.5px}
+#log div{padding:5px 10px;margin:3px 0;border-radius:8px;border-inline-start:4px solid;white-space:pre-wrap}
+.k-info{background:#16264a;border-color:#3b82f6;color:#cfe0ff}
+.k-ok{background:#12301f;border-color:var(--ok);color:#c4f3d3}
+.k-warn{background:#35280d;border-color:var(--warn);color:#ffe2a8}
+.k-err{background:#3a1519;border-color:var(--err);color:#ffc7cc}
+.clips{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-top:10px}
+.clip{background:var(--card2);border-radius:14px;padding:8px;border:1px solid var(--line)}
+.clip video{width:100%;aspect-ratio:9/16;object-fit:contain;background:#000;border-radius:10px;display:block}
+.clip .meta{font-size:12.5px;color:var(--mut);margin:6px 2px}
+.clip a,.dl{display:block;text-align:center;text-decoration:none;color:#fff;background:linear-gradient(135deg,var(--acc),var(--acc2));border-radius:10px;padding:9px;font-size:14px;font-weight:700}
+.dl{margin-top:10px;padding:12px}
+#pv{display:block;margin:10px auto 0;max-width:220px;width:100%;border-radius:12px;border:1px solid var(--line)}
+.foot{color:var(--mut);font-size:12.5px;text-align:center;margin:18px 0}
+.foot button{margin-top:6px}
+#toast{position:fixed;inset-inline:12px;bottom:calc(88px + env(safe-area-inset-bottom));max-width:616px;margin:0 auto;background:#000d;border:1px solid var(--line);padding:11px 14px;border-radius:14px;z-index:9;font-size:15px;display:none;text-align:center}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <span style="font-size:26px">🎬</span>
+    <h1>صانع الريلز</h1>
+    <span id="dot" class="dot" title="حالة المحرّك"></span>
+  </header>
+
+  <div id="offline" class="banner" hidden>
+    ⚠️ المحرّك مش شغّال. افتح <b>Termux</b> واكتب: <code>reels</code> وبعدين ارجع هنا (الصفحة هتتوصّل لوحدها).
+  </div>
+
+  <!-- تقدّم العمل -->
+  <div id="run" class="panel" hidden>
+    <div id="msg">بدأنا...</div>
+    <div class="prog"><i id="bar"></i></div>
+    <div id="log"></div>
+    <div id="results"></div>
+  </div>
+
+  <!-- 1) الفيديو -->
+  <details class="card" open>
+    <summary>🎬 الفيديو</summary>
+    <div class="body">
+      <label class="f" for="url">رابط الفيديو (يوتيوب / تيك توك / انستجرام / فيسبوك / رابط مباشر mp4, m3u8 / Drive / Dropbox)</label>
+      <div class="row">
+        <input type="text" id="url" data-k="url" inputmode="url" autocomplete="off" placeholder="https://..." dir="ltr">
+        <button class="sm" id="paste" title="لصق">📋</button>
+        <button class="sm" id="pickVideo" title="اختيار فيديو من الجهاز">📁</button>
+      </div>
+      <input type="file" id="fileVideo" accept="video/*,audio/*" hidden>
+      <div id="videoChip"></div>
+      <p class="hint">أو اضغط 📁 واختر فيديو من جهازك. الباقي مضبوط لأفضل ريلز — غالبًا هتحتاج الرابط بس.</p>
+
+      <details style="margin-top:12px">
+        <summary style="cursor:pointer;color:var(--mut)">🔐 إعدادات متقدمة (للروابط المحمية فقط)</summary>
+        <label class="f">رابط الصفحة (Referer)</label>
+        <input type="text" data-k="referer" dir="ltr" placeholder="لو الرابط بيرفض التحميل">
+        <label class="f">كوكيز المتصفح</label>
+        <input type="text" data-k="cookie" dir="ltr" placeholder="name=value; name2=value2">
+        <label class="f">ملف كوكيز (cookies.txt)</label>
+        <div class="row">
+          <input type="text" id="cookies_file" data-k="cookies_file" dir="ltr" readonly placeholder="مفيش ملف">
+          <button class="sm" id="pickCookies">📁</button>
+        </div>
+        <input type="file" id="fileCookies" hidden>
+        <div id="cookiesChip"></div>
+        <label class="f">ترويسات إضافية</label>
+        <input type="text" data-k="extra" dir="ltr" placeholder="Authorization: Bearer xxx | Origin: https://site.com">
+      </details>
+
+      <label class="rights" id="rightsBox" style="display:flex;gap:10px;align-items:center;cursor:pointer">
+        <input type="checkbox" id="rights" style="width:22px;height:22px;flex:none">
+        <span>أؤكد أني أملك حقوق الفيديو أو مصرّح لي باستخدامه</span>
+      </label>
+      <p class="hint">الفيديوهات المحمية بـ DRM مش هتتحمّل.</p>
+    </div>
+  </details>
+
+  <!-- 2) التقطيع -->
+  <details class="card">
+    <summary>✂️ التقطيع</summary>
+    <div class="body">
+      <div class="grid3">
+        <div><label class="f">أقل مدة (ث)</label><input type="number" data-k="min_l" value="15" min="3" max="600" inputmode="numeric"></div>
+        <div><label class="f">أقصى مدة (ث)</label><input type="number" data-k="max_l" value="25" min="3" max="600" inputmode="numeric"></div>
+        <div><label class="f">عدد المقاطع</label><input type="number" data-k="n" value="5" min="1" max="30" inputmode="numeric"></div>
+      </div>
+      <label class="f">طريقة اختيار المقاطع</label>
+      <select data-k="pick">
+        <option>ذكي (أحسن اللحظات)</option>
+        <option>موزّع بالتساوي</option>
+      </select>
+      <p class="hint">الذكي بيختار الأجزاء الأنشط (كلام وصوت عالي) ويقطع عند سكتات طبيعية.</p>
+    </div>
+  </details>
+
+  <!-- 3) شكل الفيديو -->
+  <details class="card">
+    <summary>📐 شكل الفيديو</summary>
+    <div class="body">
+      <label class="f">المقاس</label>
+      <select data-k="ratio">
+        <option>9:16 (ريلز / تيك توك / شورتس)</option>
+        <option>4:5 (بورتريه انستجرام)</option>
+        <option>1:1 (مربع)</option>
+      </select>
+      <label class="f">الجودة</label>
+      <select data-k="res">
+        <option value="1080">عالية — 1080 (أبطأ شوية)</option>
+        <option value="720">سريعة — 720 (أنسب للموبايلات الضعيفة)</option>
+      </select>
+      <label class="f">طريقة الملء</label>
+      <select data-k="fill">
+        <option>تلقائي (الأنسب)</option>
+        <option>قص الأطراف</option>
+        <option>خلفية مغبشة</option>
+      </select>
+      <label class="f">السرعة</label>
+      <select data-k="spd" data-num="1">
+        <option value="0.8">0.8 (أبطأ)</option><option value="0.9">0.9</option>
+        <option value="1" selected>1.0 (عادي)</option>
+        <option value="1.1">1.1</option><option value="1.25">1.25</option><option value="1.5">1.5 (أسرع)</option>
+      </select>
+      <label class="sw"><input type="checkbox" data-k="enhance" checked><span class="tg"></span><span>تحسين الصورة (حدة وألوان خفيفة)</span></label>
+    </div>
+  </details>
+
+  <!-- 4) الصوت -->
+  <details class="card">
+    <summary>🔊 الصوت والعكس</summary>
+    <div class="body">
+      <label class="sw"><input type="checkbox" data-k="use_orig" checked><span class="tg"></span><span>تشغيل صوت الفيديو الأصلي (مع توحيد المستوى)</span></label>
+      <label class="sw"><input type="checkbox" data-k="reverse"><span class="tg"></span><span>عكس الفيديو (بياخد رامات)</span></label>
+    </div>
+  </details>
+
+  <!-- 5) النص -->
+  <details class="card">
+    <summary>📝 النص العربي فوق الفيديو</summary>
+    <div class="body">
+      <label class="sw"><input type="checkbox" data-k="use_text" checked><span class="tg"></span><span>كتابة نص فوق الفيديو</span></label>
+      <label class="f">النص (اكتب | لو عايز تنزل سطر جديد)</label>
+      <textarea data-k="text">لمشاهدة وتحميل الفيديو كاملاً الرابط في البايو (الملف الشخصي)</textarea>
+      <div class="grid3">
+        <div><label class="f">المكان</label><select data-k="pos"><option>أسفل</option><option>وسط</option><option>أعلى</option></select></div>
+        <div><label class="f">الحجم</label><select data-k="font_size"><option>صغير</option><option selected>متوسط</option><option>كبير</option></select></div>
+        <div><label class="f">الخط</label><select data-k="font_choice"><option>Tajawal (عصري)</option><option>Almarai (ناعم)</option><option>Lalezar (عناوين قوية)</option><option>Amiri (نسخ كلاسيكي)</option></select></div>
+      </div>
+      <label class="f">الستايل</label>
+      <select data-k="style">
+        <option>صندوق داكن شفاف</option><option>صندوق أبيض</option><option>صندوق ذهبي</option><option>بدون صندوق (حدود وظل)</option>
+      </select>
+      <button class="sm" id="pvBtn" style="margin-top:12px">👁️ معاينة النص</button>
+      <img id="pv" alt="" hidden>
+      <p class="hint" id="pvNote"></p>
+    </div>
+  </details>
+
+  <!-- 6) الموسيقى -->
+  <details class="card">
+    <summary>🎵 موسيقى الخلفية</summary>
+    <div class="body">
+      <label class="sw"><input type="checkbox" data-k="music_on" checked><span class="tg"></span><span>إضافة موسيقى خلفية</span></label>
+      <label class="f">المصدر</label>
+      <select data-k="music_src" id="musicSrc">
+        <option>موسيقى هادئة مدمجة</option>
+        <option>رابط موسيقى أنا اخترتها</option>
+      </select>
+      <div id="musicOwn" hidden>
+        <label class="f">رابط الموسيقى أو ملف من الجهاز</label>
+        <div class="row">
+          <input type="text" id="music_url" data-k="music_url" dir="ltr" placeholder="https://...">
+          <button class="sm" id="pickMusic">📁</button>
+        </div>
+        <input type="file" id="fileMusic" accept="audio/*,video/*" hidden>
+        <div id="musicChip"></div>
+      </div>
+      <label class="f">درجة صوت الموسيقى: <b id="mvolv">8</b></label>
+      <input type="range" data-k="mvol" min="1" max="30" value="8" id="mvol" style="width:100%;accent-color:#7c5cff">
+    </div>
+  </details>
+
+  <div class="foot">
+    <div>مفتوح المصدر بالكامل: yt-dlp • FFmpeg • Python • Pillow<br>كل المعالجة على جهازك — مفيش حساب ولا سيرفر.</div>
+    <div id="ver"></div>
+    <button class="sm" id="upd">🔄 تحديث yt-dlp</button>
+  </div>
+</div>
+
+<div id="toast"></div>
+<div class="bar"><div class="in">
+  <button class="big" id="go">▶️ ابدأ عمل الريلز</button>
+  <button class="red" id="stop" hidden style="flex:none">⏹ إلغاء</button>
+</div></div>
+
+<script>
+const E = id => document.getElementById(id);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+let curJob = null, since = 0, polling = false, shown = false;
+
+/* ---------- أدوات ---------- */
+async function api(path, body) {
+  const r = await fetch(path, {
+    method: body ? 'POST' : 'GET',
+    headers: {'X-Reels': '1', 'Content-Type': 'application/json'},
+    body: body ? JSON.stringify(body) : undefined
+  });
+  return r.json();
+}
+function toast(t, ms = 3200) {
+  const el = E('toast'); el.textContent = t; el.style.display = 'block';
+  clearTimeout(toast._t); toast._t = setTimeout(() => el.style.display = 'none', ms);
+}
+function setOnline(on) { E('dot').classList.toggle('on', on); E('offline').hidden = on; }
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+/* ---------- جمع الإعدادات وحفظها ---------- */
+const NOSAVE = new Set(['url', 'cookies_file', 'music_url']);
+function collect() {
+  const S = {};
+  document.querySelectorAll('[data-k]').forEach(el => {
+    const k = el.dataset.k;
+    if (el.type === 'checkbox') S[k] = el.checked;
+    else if (el.type === 'number' || el.type === 'range' || el.dataset.num) S[k] = Number(el.value);
+    else S[k] = el.value;
+  });
+  return S;
+}
+function save() {
+  try {
+    const S = collect(); NOSAVE.forEach(k => delete S[k]);
+    localStorage.setItem('reels.settings', JSON.stringify(S));
+  } catch (e) {}
+}
+function restore() {
+  try {
+    const S = JSON.parse(localStorage.getItem('reels.settings') || '{}');
+    document.querySelectorAll('[data-k]').forEach(el => {
+      const k = el.dataset.k;
+      if (!(k in S) || NOSAVE.has(k)) return;
+      if (el.type === 'checkbox') el.checked = !!S[k]; else el.value = S[k];
+    });
+  } catch (e) {}
+  E('mvolv').textContent = E('mvol').value;
+  syncMusic();
+}
+document.addEventListener('change', save);
+document.addEventListener('input', e => { if (e.target.id === 'mvol') E('mvolv').textContent = e.target.value; save(); });
+function syncMusic() { E('musicOwn').hidden = !E('musicSrc').value.startsWith('رابط'); }
+E('musicSrc').addEventListener('change', syncMusic);
+
+/* ---------- رفع ملفات من الجهاز ---------- */
+function upload(file, kind, onp) {
+  return new Promise((res, rej) => {
+    const x = new XMLHttpRequest();
+    x.open('POST', '/api/upload?kind=' + kind + '&name=' + encodeURIComponent(file.name));
+    x.setRequestHeader('X-Reels', '1');
+    x.upload.onprogress = e => { if (e.lengthComputable && onp) onp(e.loaded / e.total); };
+    x.onload = () => { try { res(JSON.parse(x.responseText)); } catch (e) { rej(e); } };
+    x.onerror = () => rej(new Error('upload'));
+    x.send(file);
+  });
+}
+function bindPicker(btn, fileInput, input, chip, kind) {
+  E(btn).onclick = e => { e.preventDefault(); E(fileInput).click(); };
+  E(fileInput).onchange = async () => {
+    const f = E(fileInput).files[0]; if (!f) return;
+    const c = E(chip);
+    c.innerHTML = '<span class="chip">⏳ برفع الملف...</span>';
+    try {
+      const r = await upload(f, kind, p => c.innerHTML = '<span class="chip">⏳ برفع الملف... ' + Math.round(p * 100) + '%</span>');
+      if (!r.ok) throw new Error(r.msg || 'فشل');
+      E(input).value = r.path; E(input).readOnly = true;
+      c.innerHTML = '<span class="chip">📎 ' + esc(f.name) + ' <a href="#" data-x="1" style="color:var(--acc2);text-decoration:none">✕</a></span>';
+      c.querySelector('[data-x]').onclick = ev => { ev.preventDefault(); E(input).value = ''; E(input).readOnly = (kind === 'cookies'); c.innerHTML = ''; E(fileInput).value = ''; };
+    } catch (err) { c.innerHTML = ''; toast('فشل رفع الملف: ' + err.message); }
+  };
+}
+bindPicker('pickVideo', 'fileVideo', 'url', 'videoChip', 'video');
+bindPicker('pickCookies', 'fileCookies', 'cookies_file', 'cookiesChip', 'cookies');
+bindPicker('pickMusic', 'fileMusic', 'music_url', 'musicChip', 'music');
+
+E('paste').onclick = async e => {
+  e.preventDefault();
+  try { E('url').value = (await navigator.clipboard.readText()).trim(); save(); }
+  catch (err) { toast('اضغط مطوّلًا على الخانة والصق الرابط يدويًا'); }
+};
+
+/* ---------- معاينة النص ---------- */
+E('pvBtn').onclick = async e => {
+  e.preventDefault();
+  E('pvNote').textContent = 'جاري التجهيز...';
+  try {
+    const r = await api('/api/preview-text', collect());
+    E('pvNote').textContent = (r.notes || []).join(' • ') || (r.ok ? '' : (r.msg || ''));
+    if (r.ok) { E('pv').src = r.img; E('pv').hidden = false; } else { E('pv').hidden = true; if (r.msg) E('pvNote').textContent = r.msg; }
+  } catch (err) { E('pvNote').textContent = 'المحرّك مش شغّال'; }
+};
+
+/* ---------- تحديث yt-dlp ---------- */
+E('upd').onclick = async e => {
+  e.preventDefault(); E('upd').disabled = true; E('upd').textContent = '⏳ جاري التحديث (لحد دقيقتين)...';
+  try { const r = await api('/api/update', {}); toast(r.ok ? 'اتحدّث لـ ' + r.version : 'فشل التحديث: ' + (r.version || '')); loadInfo(); }
+  catch (err) { toast('فشل التحديث'); }
+  E('upd').disabled = false; E('upd').textContent = '🔄 تحديث yt-dlp';
+};
+async function loadInfo() {
+  try { const i = await api('/api/info'); E('ver').textContent = 'yt-dlp ' + (i.ytdlp || 'غير مثبّت') + (i.storage ? '' : ' • ذاكرة الجهاز غير مفعّلة'); } catch (e) {}
+}
+
+/* ---------- تشغيل ومتابعة ---------- */
+function addLog(l) {
+  const d = document.createElement('div'); d.className = 'k-' + l.k; d.textContent = l.m;
+  const box = E('log'); box.appendChild(d); box.scrollTop = box.scrollHeight;
+}
+function showResults(s) {
+  if (shown || !s.clips || !s.clips.length) return; shown = true;
+  let h = '<div class="clips">';
+  s.clips.forEach((c, i) => {
+    h += '<div class="clip"><video src="' + c.url + '" controls playsinline preload="metadata"></video>' +
+         '<div class="meta">ريل ' + (i + 1) + ' • ' + c.sec + ' ث • ' + c.mb + ' م.ب</div>' +
+         '<a href="' + c.url + '?dl=1" download="' + c.name + '">⬇️ تحميل</a></div>';
+  });
+  h += '</div>';
+  if (s.zip && s.clips.length > 1) h += '<a class="dl" href="' + s.zip + '?dl=1" download="reels.zip">📦 تحميل الكل (ZIP)</a>';
+  if (s.saved_to) h += '<p class="hint">اتحفظت كمان في ذاكرة الجهاز: <b dir="ltr">' + esc(s.saved_to) + '</b></p>';
+  E('results').innerHTML = h;
+  try { if (navigator.vibrate && navigator.userActivation && navigator.userActivation.hasBeenActive) navigator.vibrate(200); } catch (e) {}
+}
+function apply(s) {
+  if (s.job !== curJob) { curJob = s.job; since = 0; E('log').innerHTML = ''; E('results').innerHTML = ''; shown = false; }
+  s.logs.forEach(addLog); since = s.n;
+  const active = s.state !== 'idle';
+  E('run').hidden = !active;
+  E('msg').textContent = s.msg || '';
+  E('bar').style.width = (s.pct || 0) + '%';
+  const running = s.state === 'running';
+  E('go').disabled = running; E('stop').hidden = !running;
+  if (s.state === 'done') showResults(s);
+}
+async function poll() {
+  if (polling) return; polling = true;
+  try {
+    for (;;) {
+      const s = await api('/api/status?since=' + since + '&job=' + (curJob === null ? '' : curJob));
+      setOnline(true); apply(s);
+      if (s.state !== 'running') break;
+      await sleep(1000);
+    }
+  } catch (e) {
+    setOnline(false); polling = false; setTimeout(poll, 3000); return;
+  }
+  polling = false;
+}
+E('go').onclick = async () => {
+  const S = collect();
+  if (!E('rights').checked) {
+    toast('علّم على «أؤكد أني أملك حقوق الفيديو» الأول');
+    const b = E('rightsBox'); b.classList.remove('shake'); void b.offsetWidth; b.classList.add('shake');
+    b.closest('details').open = true; b.scrollIntoView({behavior: 'smooth', block: 'center'}); return;
+  }
+  if (!S.url.trim()) { toast('الصق رابط الفيديو أو اختر فيديو من جهازك'); E('url').focus(); return; }
+  S.rights = true;
+  try {
+    const r = await api('/api/start', S);
+    if (!r.ok) { toast(r.msg || 'تعذّر البدء'); return; }
+    curJob = null; since = 0; shown = false;
+    E('run').hidden = false; E('go').disabled = true; E('stop').hidden = false;
+    E('log').innerHTML = ''; E('results').innerHTML = ''; E('bar').style.width = '0%'; E('msg').textContent = 'بدأنا...';
+    poll(); E('run').scrollIntoView({behavior: 'smooth', block: 'start'});
+  } catch (e) { setOnline(false); toast('المحرّك مش شغّال — افتح Termux واكتب: reels'); }
+};
+E('stop').onclick = async () => { try { await api('/api/cancel', {}); toast('بلغي...'); } catch (e) {} };
+
+/* ---------- المشاركة من تطبيقات تانية (Web Share Target) ---------- */
+(function () {
+  try {
+    const q = new URLSearchParams(location.search);
+    const blob = [q.get('url'), q.get('text'), q.get('title')].filter(Boolean).join(' ');
+    const m = blob.match(/https?:\/\/[^\s"'<>]+/);
+    if (m) { E('url').value = m[0]; toast('اتضاف الرابط اللي شاركته ✓'); }
+    if (location.search) history.replaceState(null, '', '/');
+  } catch (e) {}
+})();
+
+restore();
+poll();
+loadInfo();
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+</script>
+</body>
+</html>

@@ -1,0 +1,34 @@
+plugins { id 'com.android.application' }
+
+android {
+    namespace 'com.reelsmaker.app'
+    compileSdk 34
+    defaultConfig {
+        applicationId 'com.reelsmaker.app'
+        minSdk 23
+        targetSdk 34
+        versionCode 2
+        versionName '2.0'
+        // بتتحقن وقت البناء على GitHub من الـ Secret (مش متكتوبة في الكود)
+        buildConfigField "String", "APP_TOKEN", "\"${project.findProperty('appToken') ?: ''}\""
+        buildConfigField "String", "APP_REPO", "\"${project.findProperty('appRepo') ?: ''}\""
+    }
+    buildFeatures { buildConfig true }
+    // مفتاح توقيع ثابت: عشان التحديث يتثبت فوق النسخة القديمة من غير ما يطلب حذفها
+    signingConfigs {
+        main {
+            storeFile file('reels.keystore')
+            storePassword 'reelsmaker'
+            keyAlias 'reels'
+            keyPassword 'reelsmaker'
+        }
+    }
+    buildTypes {
+        debug { signingConfig signingConfigs.main }
+        release { minifyEnabled false; signingConfig signingConfigs.main }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
