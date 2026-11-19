@@ -13,6 +13,11 @@ import android.os.Bundle;
 import android.os.Environment;
 import android.provider.MediaStore;
 import android.text.InputType;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.Context;
+import android.graphics.Color;
+import android.graphics.drawable.GradientDrawable;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -23,8 +28,6 @@ import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
-import android.widget.ScrollView;
-import android.widget.Spinner;
 import android.widget.TextView;
 
 import org.json.JSONArray;
@@ -47,31 +50,59 @@ public class MainActivity extends Activity {
     static final String TOK = BuildConfig.APP_TOKEN;
     SharedPreferences sp;
     EditText link, count, minL, maxL, text;
-    Spinner res;
+    String resv = "1080";
+    Button q720, q1080;
     CheckBox reverse, music, rights;
     TextView status;
     ProgressBar bar;
     Button go, last;
     volatile boolean busy = false;
 
+    static final int BG = 0xFF0E1224, CARD = 0xFF1A2040, ACC = 0xFF7C5CFF, ACC2 = 0xFF2DD4BF, TXT = 0xFFF1F3FF, DIM = 0xFF8E95B8;
+
     int dp(int v) { return (int) (v * getResources().getDisplayMetrics().density + 0.5f); }
+
+    GradientDrawable shape(int color, int r) {
+        GradientDrawable g = new GradientDrawable();
+        g.setColor(color);
+        g.setCornerRadius(dp(r));
+        return g;
+    }
 
     TextView label(LinearLayout p, String s) {
         TextView t = new TextView(this);
         t.setText(s);
-        t.setTextSize(14);
-        t.setPadding(0, dp(12), 0, dp(2));
+        t.setTextSize(12);
+        t.setTextColor(DIM);
+        t.setPadding(dp(4), dp(8), dp(4), dp(3));
         p.addView(t);
         return t;
     }
 
-    EditText field(LinearLayout p, String lbl, String val, int type) {
-        label(p, lbl);
+    EditText box(String hint, String val, int type) {
         EditText e = new EditText(this);
         e.setText(val);
+        e.setHint(hint);
         e.setInputType(type);
-        e.setSingleLine(type != InputType.TYPE_CLASS_TEXT);
-        p.addView(e, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        e.setSingleLine(true);
+        e.setTextColor(TXT);
+        e.setHintTextColor(DIM);
+        e.setTextSize(15);
+        e.setBackground(shape(CARD, 12));
+        e.setPadding(dp(12), 0, dp(12), 0);
+        return e;
+    }
+
+    LinearLayout.LayoutParams lp(int w, int h, float wt, int m) {
+        LinearLayout.LayoutParams l = new LinearLayout.LayoutParams(w, h, wt);
+        l.setMargins(dp(m), 0, dp(m), 0);
+        return l;
+    }
+
+    EditText field(LinearLayout p, String lbl, String val, int type) {
+        label(p, lbl);
+        EditText e = box("", val, type);
+        p.addView(e, lp(-1, dp(46), 0, 0));
         return e;
     }
 
@@ -79,64 +110,144 @@ public class MainActivity extends Activity {
         CheckBox c = new CheckBox(this);
         c.setText(s);
         c.setChecked(v);
-        p.addView(c);
+        c.setTextColor(TXT);
+        c.setTextSize(13);
+        c.setButtonTintList(android.content.res.ColorStateList.valueOf(ACC2));
+        p.addView(c, lp(-2, -2, 1, 0));
         return c;
+    }
+
+    Button pill(String s, boolean on) {
+        Button b = new Button(this);
+        b.setText(s);
+        b.setAllCaps(false);
+        b.setTextColor(TXT);
+        b.setTextSize(14);
+        b.setBackground(shape(on ? ACC : CARD, 12));
+        b.setStateListAnimator(null);
+        return b;
+    }
+
+    void setRes(String r) {
+        resv = r;
+        q720.setBackground(shape("720".equals(r) ? ACC : CARD, 12));
+        q1080.setBackground(shape("1080".equals(r) ? ACC : CARD, 12));
     }
 
     @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
         sp = getSharedPreferences("reels", MODE_PRIVATE);
-        ScrollView sv = new ScrollView(this);
-        sv.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+        getWindow().setStatusBarColor(BG);
+        getWindow().setNavigationBarColor(BG);
+        getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN);
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(18), dp(24), dp(18), dp(32));
-        sv.addView(root);
+        root.setBackgroundColor(BG);
+        root.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+        root.setPadding(dp(18), dp(22), dp(18), dp(14));
 
         TextView title = new TextView(this);
         title.setText("🎬 صانع الريلز");
-        title.setTextSize(24);
+        title.setTextSize(26);
+        title.setTextColor(TXT);
+        title.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
         title.setGravity(Gravity.CENTER);
         root.addView(title);
         TextView sub = new TextView(this);
-        sub.setText("الصق الرابط وخلاص — الشغل كله على سيرفر، مش على موبايلك ولا نتك");
+        sub.setText("الصق أي رابط فيه فيديو — والشغل كله على السيرفر");
+        sub.setTextSize(12);
+        sub.setTextColor(DIM);
         sub.setGravity(Gravity.CENTER);
         root.addView(sub);
 
-        link = field(root, "🔗 رابط الفيديو", "", InputType.TYPE_TEXT_VARIATION_URI);
-        count = field(root, "عدد الريلز", sp.getString("n", "5"), InputType.TYPE_CLASS_NUMBER);
-        minL = field(root, "أقل مدة (ثواني)", sp.getString("min", "15"), InputType.TYPE_CLASS_NUMBER);
-        maxL = field(root, "أقصى مدة (ثواني)", sp.getString("max", "25"), InputType.TYPE_CLASS_NUMBER);
+        label(root, "🔗 رابط الفيديو (مباشر • تحميل • توكن • صفحة)");
+        LinearLayout lr = new LinearLayout(this);
+        link = box("https://...", "", InputType.TYPE_TEXT_VARIATION_URI);
+        Button paste = pill("لصق", true);
+        paste.setOnClickListener(v -> {
+            ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+            if (cm != null && cm.hasPrimaryClip() && cm.getPrimaryClip().getItemCount() > 0) {
+                CharSequence t = cm.getPrimaryClip().getItemAt(0).coerceToText(this);
+                if (t != null) link.setText(t.toString().trim());
+            }
+        });
+        lr.addView(link, lp(0, dp(46), 1, 0));
+        lr.addView(paste, lp(dp(64), dp(46), 0, 0));
+        root.addView(lr);
+
+        LinearLayout nr = new LinearLayout(this);
+        String[] lbls = {"عدد الريلز", "أقل مدة (ث)", "أقصى مدة (ث)"};
+        EditText[] es = new EditText[3];
+        String[] vals = {sp.getString("n", "5"), sp.getString("min", "15"), sp.getString("max", "25")};
+        for (int i = 0; i < 3; i++) {
+            LinearLayout c = new LinearLayout(this);
+            c.setOrientation(LinearLayout.VERTICAL);
+            es[i] = field(c, lbls[i], vals[i], InputType.TYPE_CLASS_NUMBER);
+            es[i].setGravity(Gravity.CENTER);
+            nr.addView(c, lp(0, -2, 1, 3));
+        }
+        count = es[0]; minL = es[1]; maxL = es[2];
+        root.addView(nr);
+
         label(root, "الجودة");
-        res = new Spinner(this);
-        res.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, new String[]{"1080", "720"}));
-        res.setSelection("720".equals(sp.getString("res", "1080")) ? 1 : 0);
-        root.addView(res);
+        LinearLayout qr = new LinearLayout(this);
+        q1080 = pill("1080 · عالية", true);
+        q720 = pill("720 · أسرع", false);
+        q1080.setOnClickListener(v -> setRes("1080"));
+        q720.setOnClickListener(v -> setRes("720"));
+        qr.addView(q1080, lp(0, dp(42), 1, 3));
+        qr.addView(q720, lp(0, dp(42), 1, 3));
+        root.addView(qr);
+        setRes(sp.getString("res", "1080"));
+
         text = field(root, "النص العربي على الفيديو",
                 sp.getString("text", "لمشاهدة وتحميل كاملا الرابط في البايو الملف الشخصي"), InputType.TYPE_CLASS_TEXT);
-        reverse = check(root, "عكس الفيديو (Mirror)", sp.getBoolean("rev", false));
-        music = check(root, "موسيقى هادئة في الخلفية", sp.getBoolean("mus", true));
+
+        LinearLayout cr = new LinearLayout(this);
+        reverse = check(cr, "عكس الفيديو", sp.getBoolean("rev", false));
+        music = check(cr, "موسيقى هادئة", sp.getBoolean("mus", true));
+        root.addView(cr);
         rights = check(root, "أؤكد أني أملك حقوق الفيديو أو مصرّح لي", false);
 
         go = new Button(this);
-        go.setText("ابدأ ☁️");
-        root.addView(go);
-        last = new Button(this);
-        last.setText("⬇️ نزّل آخر ملف جاهز");
-        root.addView(last);
+        go.setText("ابدأ الآن ☁️");
+        go.setAllCaps(false);
+        go.setTextSize(17);
+        go.setTextColor(Color.WHITE);
+        go.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        GradientDrawable gd = new GradientDrawable(GradientDrawable.Orientation.RIGHT_LEFT, new int[]{ACC, ACC2});
+        gd.setCornerRadius(dp(14));
+        go.setBackground(gd);
+        go.setStateListAnimator(null);
+        LinearLayout.LayoutParams gl = lp(-1, dp(54), 0, 0);
+        gl.topMargin = dp(10);
+        root.addView(go, gl);
+
         bar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         bar.setIndeterminate(true);
-        bar.setVisibility(View.GONE);
-        root.addView(bar);
+        bar.setIndeterminateTintList(android.content.res.ColorStateList.valueOf(ACC2));
+        bar.setVisibility(View.INVISIBLE);
+        root.addView(bar, lp(-1, dp(4), 0, 0));
         status = new TextView(this);
-        status.setPadding(0, dp(12), 0, dp(12));
+        status.setTextColor(TXT);
+        status.setTextSize(13);
+        status.setGravity(Gravity.CENTER);
+        status.setMaxLines(4);
         status.setText("جاهز.");
-        root.addView(status);
+        root.addView(status, lp(-1, 0, 1, 0));
+        last = new Button(this);
+        last.setText("⬇️ نزّل آخر ملف جاهز");
+        last.setAllCaps(false);
+        last.setTextColor(TXT);
+        last.setTextSize(13);
+        last.setBackground(shape(CARD, 12));
+        last.setStateListAnimator(null);
+        root.addView(last, lp(-1, dp(42), 0, 0));
 
         go.setOnClickListener(v -> start());
         last.setOnClickListener(v -> downloadLast());
-        setContentView(sv);
+        setContentView(root);
     }
 
     // ───────── أدوات ─────────
@@ -157,7 +268,7 @@ public class MainActivity extends Activity {
         sp.edit().putString("n", count.getText().toString().trim())
                 .putString("min", minL.getText().toString().trim())
                 .putString("max", maxL.getText().toString().trim())
-                .putString("res", res.getSelectedItem().toString())
+                .putString("res", resv)
                 .putString("text", text.getText().toString())
                 .putBoolean("rev", reverse.isChecked())
                 .putBoolean("mus", music.isChecked()).apply();
@@ -235,7 +346,7 @@ public class MainActivity extends Activity {
             in.put("n", count.getText().toString().trim());
             in.put("min_l", minL.getText().toString().trim());
             in.put("max_l", maxL.getText().toString().trim());
-            in.put("res", res.getSelectedItem().toString());
+            in.put("res", resv);
             in.put("reverse", String.valueOf(reverse.isChecked()));
             in.put("text", text.getText().toString());
             in.put("music", String.valueOf(music.isChecked()));
@@ -259,9 +370,9 @@ public class MainActivity extends Activity {
     /** بيتابع العملية لحد ما تخلص وبعدين ينزّل الملف. */
     void track(String job) throws Exception {
         long id = 0;
-        for (int i = 0; i < 60 && id == 0; i++) {
+        for (int i = 0; i < 90 && id == 0; i++) {
             id = findRun(job);
-            if (id == 0) Thread.sleep(4000);
+            if (id == 0) Thread.sleep(2000);
         }
         if (id == 0) throw new Exception("السيرفر ما بدأش الشغل — جرّب تاني.");
         long t0 = System.currentTimeMillis();
@@ -274,13 +385,25 @@ public class MainActivity extends Activity {
             if ("completed".equals(st)) {
                 String con = j.optString("conclusion");
                 if ("success".equals(con)) break;
-                throw new Exception("الشغل فشل (" + con + "). غالبًا الرابط مش مدعوم أو الموقع منع التحميل. جرّب رابط تاني.");
+                throw new Exception(failReason(job, con));
             }
             ui("☁️ السيرفر شغّال... (" + mins + " د) — تقدر تسيب التطبيق وترجع تدوس «نزّل آخر ملف»");
             if (mins > 100) throw new Exception("الشغل طوّل أوي.");
-            Thread.sleep(15000);
+            Thread.sleep(5000);
         }
         downloadTag("reels-" + job);
+    }
+
+    /** بيجيب سبب الفشل الحقيقي اللي السيرفر سجّله. */
+    String failReason(String job, String con) {
+        try {
+            String[] x = http("GET", API + "/repos/" + REPO + "/releases/tags/err-" + job, null, null);
+            if ("200".equals(x[0])) {
+                String b = new JSONObject(x[1]).optString("body", "").trim();
+                if (!b.isEmpty()) return b.length() > 320 ? b.substring(0, 320) : b;
+            }
+        } catch (Exception ignored) { }
+        return "الشغل فشل (" + con + "). جرّب رابط تاني.";
     }
 
     void downloadLast() {

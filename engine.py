@@ -467,7 +467,7 @@ def ytdlp_download(url, outbase, referer, cookie, extra, cookies_file, prog, aud
         return None, "yt-dlp غير مثبّت"
     base = [sys.executable, "-m", "yt_dlp", "--no-playlist", "--newline", "--no-colors", "--ignore-config",
             "--retries", "5", "--fragment-retries", "10", "--socket-timeout", "30",
-            "--concurrent-fragments", "4", "--user-agent", UA, "--no-check-certificates",
+            "--concurrent-fragments", "16", "--user-agent", UA, "--no-check-certificates",
             "-o", outbase + ".%(ext)s"]
     if not audio_only:
         base += ["--merge-output-format", "mp4", "-S", "res,vcodec:h264,acodec:m4a"]
@@ -1336,7 +1336,7 @@ def build_cmd(src, start, length, out, P, text_png, music, use_text, use_music):
     cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-progress", "pipe:1", "-nostats"] \
         + inputs + ["-filter_complex", fc, "-map", "[v]"]
     cmd += (["-map", "[a]", "-c:a", "aac", "-b:a", "192k", "-ar", "44100", "-ac", "2"] if fa else ["-an"])
-    cmd += ["-t", f"{out_len:.3f}", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-maxrate", "10M",
+    cmd += ["-t", f"{out_len:.3f}", "-c:v", "libx264", "-preset", "superfast", "-crf", "23", "-maxrate", "10M",
             "-bufsize", "20M", "-profile:v", "high", "-pix_fmt", "yuv420p", "-r", "30",
             "-movflags", "+faststart", "-map_metadata", "-1", out]
     return cmd, out_len
