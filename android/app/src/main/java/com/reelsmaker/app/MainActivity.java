@@ -231,9 +231,10 @@ public class MainActivity extends Activity {
         root.addView(bar, lp(-1, dp(4), 0, 0));
         status = new TextView(this);
         status.setTextColor(TXT);
-        status.setTextSize(13);
+        status.setTextSize(12);
+        status.setTextIsSelectable(true);
         status.setGravity(Gravity.CENTER);
-        status.setMaxLines(4);
+        status.setMaxLines(14);
         status.setText("جاهز.");
         root.addView(status, lp(-1, 0, 1, 0));
         last = new Button(this);
@@ -400,7 +401,7 @@ public class MainActivity extends Activity {
             String[] x = http("GET", API + "/repos/" + REPO + "/releases/tags/err-" + job, null, null);
             if ("200".equals(x[0])) {
                 String b = new JSONObject(x[1]).optString("body", "").trim();
-                if (!b.isEmpty()) return b.length() > 320 ? b.substring(0, 320) : b;
+                if (!b.isEmpty()) return b.length() > 700 ? b.substring(0, 700) : b;
             }
         } catch (Exception ignored) { }
         return "الشغل فشل (" + con + "). جرّب رابط تاني.";

@@ -61,7 +61,7 @@ jobs:
           if ! command -v ffmpeg >/dev/null || ! dpkg -s libraqm0 >/dev/null 2>&1; then
             sudo apt-get update -y -qq && sudo apt-get install -y -qq ffmpeg libraqm0 fonts-dejavu-core
           fi
-          python -m pip install -q --disable-pip-version-check "yt-dlp[default]" requests six fonttools arabic-reshaper "python-bidi==0.4.2" pillow numpy
+          python -m pip install -q --disable-pip-version-check "yt-dlp[default,curl-cffi]" requests six fonttools arabic-reshaper "python-bidi==0.4.2" pillow numpy
           python engine.py --fonts || true
 
       - name: تجهيز الإعدادات
@@ -95,7 +95,11 @@ jobs:
           JOB: ${{ inputs.job }}
         run: |
           [[ "$JOB" =~ ^[a-z0-9]{6,32}$ ]] || exit 0
-          msg=$(grep -v '^RESULT_DIR' run.log 2>/dev/null | grep -v '^\s*$' | tail -n 8 | cut -c1-300 | sed -E 's#https?://[^ ]+#<رابط>#g')
+          clean() { sed -E 's#\[(info|err|warn)\]##g; s#https?://[^ ]+#<رابط>#g'; }
+          tech=$(grep -A4 'تفاصيل تقنية' run.log 2>/dev/null | clean | tr '\n' ' ' | cut -c1-420)
+          hints=$(grep '•' run.log 2>/dev/null | clean | head -n 3 | cut -c1-160)
+          msg=$(printf '%s\n%s' "$tech" "$hints")
+          [ -n "$tech" ] || msg=$(grep -v '^RESULT_DIR' run.log 2>/dev/null | grep -v '^\s*$' | tail -n 8 | cut -c1-250 | clean)
           [ -n "$msg" ] || msg="فشل غير معروف — جرّب رابط تاني"
           gh release create "err-$JOB" --title "err" --notes "$msg" || true
           gh release list --limit 100 --json tagName --jq '.[].tagName' | grep '^err-' | tail -n +21 | \
