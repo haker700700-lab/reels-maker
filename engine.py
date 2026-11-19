@@ -602,71 +602,6 @@ def sniff_candidates(text, base_url):
     return out[:12], frames[:3]
 
 
-def browser_sniff(url, prog):
-    """متصفح حقيقي على السيرفر: يفتح الصفحة ويلقط روابط الفيديو الفعلية (والتوكن بتاعها بيتولّد من نفس السيرفر)."""
-    try:
-        from playwright.sync_api import sync_playwright
-    except Exception:
-        prog.update("بجهّز متصفح السيرفر (مرة واحدة)...", force=True)
-        run([sys.executable, "-m", "pip", "install", "-q", "playwright"], timeout=240)
-        run([sys.executable, "-m", "playwright", "install", "--with-deps", "chromium"], timeout=600)
-        try:
-            from playwright.sync_api import sync_playwright
-        except Exception:
-            return []
-    found, seen, cookies = [], set(), ""
-    try:
-        with sync_playwright() as p:
-            b = p.chromium.launch(args=["--no-sandbox", "--autoplay-policy=no-user-gesture-required"])
-            ctx = b.new_context(user_agent=UA, viewport={"width": 1280, "height": 720})
-            pg = ctx.new_page()
-
-            def add(u):
-                if u and u.startswith("http") and u not in seen and not any(w in u.lower() for w in BAD_WORDS):
-                    seen.add(u)
-                    found.append(u)
-
-            def on_resp(r):
-                try:
-                    u, ct = r.url, (r.headers.get("content-type") or "").lower()
-                    path = urllib.parse.urlparse(u).path.lower()
-                    if path.endswith((".m3u8", ".mpd", ".mp4", ".webm", ".m4v", ".mov")) or "video/" in ct \
-                            or "mpegurl" in ct or "dash+xml" in ct:
-                        add(u)
-                except Exception:
-                    pass
-
-            pg.on("response", on_resp)
-            prog.update("بفتح الصفحة في متصفح السيرفر...", force=True)
-            try:
-                pg.goto(url, wait_until="domcontentloaded", timeout=45000)
-            except Exception:
-                pass
-            for _ in range(6):
-                pg.wait_for_timeout(2500)
-                for sel in ("video", ".vjs-big-play-button", "[class*=play]", "button[aria-label*=lay]"):
-                    try:
-                        pg.click(sel, timeout=800)
-                    except Exception:
-                        pass
-                try:
-                    pg.evaluate("document.querySelectorAll('video').forEach(v=>{v.muted=true;v.play().catch(()=>{})})")
-                    for s in pg.evaluate("[...document.querySelectorAll('video,source')].map(e=>e.currentSrc||e.src)"):
-                        add(s)
-                except Exception:
-                    pass
-                if found:
-                    break
-            cookies = "; ".join(f"{c['name']}={c['value']}" for c in ctx.cookies())
-            b.close()
-    except Exception:
-        pass
-    hd = {"Referer": url, "User-Agent": UA}
-    if cookies:
-        hd["Cookie"] = cookies
-    return [(u, hd) for u in found[:6]]
-
-
 # ════════════════════════════════════════════════════════════
 #  المحمّل الشامل: أي رابط فيه فيديو
 # ════════════════════════════════════════════════════════════
@@ -839,22 +774,6 @@ def fetch_media(raw, work, name, opts, prog, need_video=True):
             v = accept(p)
             if v:
                 return done(v)
-
-    # 3.5) متصفح حقيقي على السيرفر (للصفحات والروابط الموقّعة)
-    for mu, mh in browser_sniff(url, prog):
-        prog.update(f"المتصفح لقى فيديو، بجرّبه: {mu[:80]}", force=True)
-        low = urllib.parse.urlparse(mu).path.lower()
-        p, err = ytdlp_download(mu, base + "_b", url, mh.get("Cookie"), {}, cfile, prog, maxh=maxh)
-        v = accept(p)
-        if not v and low.endswith((".m3u8", ".mpd")):
-            p, err = ffmpeg_stream(mu, mh, base + "_b.mp4", prog)
-            v = accept(p)
-        if not v and not low.endswith((".m3u8", ".mpd")):
-            res = try_direct(mu, mh, base + "_b", prog)
-            if res["kind"] == "media":
-                v = accept(res["path"])
-        if v:
-            return done(v)
 
     # 4) آخر محاولة: ffmpeg على الرابط كما هو
     prog.update("آخر محاولة بـ ffmpeg...", force=True)
