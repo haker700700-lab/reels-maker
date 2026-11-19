@@ -467,7 +467,7 @@ def ytdlp_download(url, outbase, referer, cookie, extra, cookies_file, prog, aud
         return None, "yt-dlp غير مثبّت"
     base = [sys.executable, "-m", "yt_dlp", "--no-playlist", "--newline", "--no-colors", "--ignore-config",
             "--retries", "5", "--fragment-retries", "10", "--socket-timeout", "30",
-            "--concurrent-fragments", "16", "--user-agent", UA, "--no-check-certificates",
+            "--concurrent-fragments", "16", "--http-chunk-size", "10M", "--user-agent", UA, "--no-check-certificates",
             "-o", outbase + ".%(ext)s"]
     if not audio_only:
         base += ["--merge-output-format", "mp4", "-S", "res,vcodec:h264,acodec:m4a"]
@@ -514,6 +514,27 @@ def ytdlp_download(url, outbase, referer, cookie, extra, cookies_file, prog, aud
         if any(x in low for x in ("private video", "video unavailable", "has been removed", "drm")):
             break
     return None, last
+
+
+def ytdlp_duration(url, cookies_file="", timeout=45):
+    """مدة الفيديو بالثواني من غير تحميل (عشان نقرر الجودة للفيديوهات الطويلة). None لو مش معروفة."""
+    if not have_ytdlp():
+        return None
+    cmd = [sys.executable, "-m", "yt_dlp", "--no-playlist", "--no-warnings", "--ignore-config", "--skip-download",
+           "--socket-timeout", "20", "--print", "duration", "--user-agent", UA]
+    if cookies_file:
+        cmd += ["--cookies", cookies_file]
+    r = run(cmd + [url], timeout=timeout)
+    if r.returncode != 0:
+        return None
+    for line in (r.stdout or "").splitlines():
+        try:
+            v = float(line.strip())
+            if v > 0:
+                return v
+        except ValueError:
+            continue
+    return None
 
 
 def ffmpeg_stream(url, headers, out, prog):
@@ -1122,56 +1143,40 @@ def build_text_overlay(work, W, H, ratio, S, quiet=False):
 
     layout = ImageFont.Layout.RAQM if mode == "raqm" else ImageFont.Layout.BASIC
     style = STYLES.get(S["style"], STYLES["صندوق داكن شفاف"])
-    base_fs = int(W * {"صغير": 0.045, "متوسط": 0.058, "كبير": 0.072}.get(S["font_size"], 0.058))
-    max_box_w = int(W * 0.90)
-    pad_x_k, pad_y_k = 0.85, 0.50
+    base_fs = int(W * {"صغير": 0.050, "متوسط": 0.064, "كبير": 0.078}.get(S["font_size"], 0.064))
+    max_box_w = int(W * 0.94)
+    pad_x_k, pad_y_k = 0.60, 0.36
     probe_img = ImageDraw.Draw(Image.new("RGBA", (10, 10)))
 
-    def wrap(words, font, maxw):
-        def greedy(w):
-            lines, cur = [], ""
-            for wd in words:
-                t = (cur + " " + wd).strip()
-                if cur and probe_img.textlength(prep(t), font=font, **kw(t)) > w:
-                    lines.append(cur)
-                    cur = wd
-                else:
-                    cur = t
-            if cur:
-                lines.append(cur)
-            return lines
-        first = greedy(maxw)
-        k = len(first)
-        lo = max(probe_img.textlength(prep(wd), font=font, **kw(wd)) for wd in words)
-        hi = maxw
-        if lo >= hi:
-            return first
-        for _ in range(18):
-            mid = (lo + hi) / 2
-            if len(greedy(mid)) <= k:
-                hi = mid
-            else:
-                lo = mid
-        return greedy(hi)
-
+    # سطر واحد دايمًا: بنوحّد كل الفواصل (| أو سطر جديد) في سطر، وبنصغّر الخط لحد ما يكفي العرض
+    text = re.sub(r"\s*(?:\||\n)\s*", " ", text).strip()
+    text = re.sub(r"\s{2,}", " ", text)
+    min_fs = max(18, int(W * 0.030))
+    words = text.split()
+    cut = False
     fs = base_fs
     while True:
         font = ImageFont.truetype(path, fs, layout_engine=layout)
         pad_x, pad_y = int(fs * pad_x_k), int(fs * pad_y_k)
         maxw = max_box_w - 2 * pad_x
-        lines = []
-        for seg in re.split(r"\s*(?:\||\n)\s*", text):
-            seg = seg.strip()
-            if seg:
-                lines += wrap(seg.split(), font, maxw)
-        if not lines:
-            return None, None, notes
-        widest = max(probe_img.textlength(prep(l), font=font, **kw(l)) for l in lines)
-        if (len(lines) <= 4 and widest <= maxw + 1) or fs <= 26:
+        widest = probe_img.textlength(prep(text), font=font, **kw(text))
+        if widest <= maxw + 1:
             break
-        fs = int(fs * 0.92)
+        if fs > min_fs:
+            fs = max(min_fs, min(fs - 1, int(fs * maxw / widest)))
+            continue
+        if len(words) > 1:  # نص طويل جدًا حتى بأصغر خط مقروء: بنقصّ آخره بدل ما نخلّي الخط مش مقروء
+            words.pop()
+            text = " ".join(words) + "…"
+            cut = True
+            continue
+        break
+    if cut:
+        note("النص طويل جدًا عشان يتحط في سطر واحد بخط مقروء، فاتقصّ آخره. اختصره لو عايزه كامل.", "warn")
+    lines = [text]
+    widest = probe_img.textlength(prep(text), font=font, **kw(text))
 
-    lh = int(fs * 1.55)
+    lh = int(fs * 1.5)
     bw = int(widest) + 2 * pad_x
     bh = len(lines) * lh + 2 * pad_y
     top_lim = {"9:16": 0.13, "4:5": 0.07, "1:1": 0.06}[ratio]
@@ -1280,6 +1285,19 @@ def audio_energy(src, hop=0.25, max_seconds=240):
 
 def uniform_windows(dur, n, L):
     return [(max(0.0, min(dur - L, (i + 0.5) * dur / n - L / 2)), L) for i in range(n)]
+
+
+def no_overlap(ws, dur):
+    """كل ريل من جزء مختلف تمامًا في الفيديو: مفيش مقطع بيتكرر ولا بيتداخل مع اللي قبله."""
+    out, end = [], 0.0
+    for st, ln in sorted(ws):
+        st = max(st, end)
+        ln = min(ln, dur - st)
+        if ln < 3 and out:
+            continue
+        out.append((round(st, 2), round(max(ln, 0.5), 2)))
+        end = st + ln
+    return out
 
 
 def smart_windows(src, dur, n, L, min_l, max_l):
@@ -1416,9 +1434,9 @@ def build_cmd(src, start, length, out, P, text_png, music, use_text, use_music):
     fc = vf + (";" + fa if fa else "")
     cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-progress", "pipe:1", "-nostats"] \
         + inputs + ["-filter_complex", fc, "-map", "[v]"]
-    cmd += (["-map", "[a]", "-c:a", "aac", "-b:a", "192k", "-ar", "44100", "-ac", "2"] if fa else ["-an"])
-    cmd += ["-t", f"{out_len:.3f}", "-c:v", "libx264", "-preset", "superfast", "-crf", "23", "-maxrate", "10M",
-            "-bufsize", "20M", "-profile:v", "high", "-pix_fmt", "yuv420p", "-r", "30",
+    cmd += (["-map", "[a]", "-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-ac", "2"] if fa else ["-an"])
+    cmd += ["-t", f"{out_len:.3f}", "-c:v", "libx264", "-preset", "superfast", "-crf", "24", "-maxrate", "6M",
+            "-bufsize", "12M", "-profile:v", "high", "-pix_fmt", "yuv420p", "-r", "30",
             "-movflags", "+faststart", "-map_metadata", "-1", out]
     return cmd, out_len
 
@@ -1535,6 +1553,20 @@ def _main(raw):
     opts = {k: S[k] for k in ("referer", "cookie", "extra", "cookies_file")}
     opts["maxh"] = 1080 if S["res"] == "1080" else 720
 
+    # فيديو طويل (أكتر من 40 دقيقة): بنحمّل مصدر 720 بدل 1080 — أسرع بكتير وبنفس جودة الريل تقريبًا
+    try:
+        _u0 = extract_url(S["url"])
+        if _u0 and not os.path.isfile(os.path.expanduser(S["url"].strip())) and opts["maxh"] > 720:
+            _u1 = normalize_url(_u0)
+            _h = urllib.parse.urlparse(_u1).netloc.lower()
+            if any(_h == x or _h.endswith(x) for x in SITES_FIRST):
+                _d0 = ytdlp_duration(_u1, S["cookies_file"])
+                if _d0 and _d0 > 2400:
+                    opts["maxh"] = 720
+                    say(f"الفيديو طويل ({fmt_t(_d0)}): هحمّله بجودة 720 عشان الشغل يخلص أسرع.", "info")
+    except Exception:
+        pass
+
     # ---------- 1) التحميل ----------
     say("1️⃣ تحميل الفيديو...")
     prog.stage(0, 35)
@@ -1585,6 +1617,7 @@ def _main(raw):
     if not windows:
         windows = uniform_windows(dur, n, L) if dur >= min_l else [(0.0, dur)]
         say("تم توزيع المقاطع بالتساوي على طول الفيديو.")
+    windows = no_overlap(windows, dur)
     for i, (st, ln) in enumerate(windows):
         say(f"ريل {i+1}: {fmt_t(st)} ← {fmt_t(st+ln)}  ({ln:.0f} ث)")
 
@@ -1640,38 +1673,57 @@ def _main(raw):
     # ---------- 5) تصيير الريلز ----------
     say(f"2️⃣ بعمل {len(windows)} ريل ({W}×{H})... (على الموبايل ممكن ياخد كام دقيقة، سيب الشاشة شغّالة أو التطبيق مفتوح)")
     prog.stage(45, 97)
-    clips, ok_times = [], []
     total = len(windows)
-    for i, (st, ln) in enumerate(windows):
+    fracs = [0.0] * total
+    flock = threading.Lock()
+    t_render = time.time()
+    headless = bool(os.environ.get("REELS_HEADLESS"))
+    workers = max(1, min(2, total, os.cpu_count() or 1)) if headless else 1
+
+    def render_one(i):
+        st, ln = windows[i]
         out = f"{WORK}/clips/reel_{i+1:02d}.mp4"
-        t1 = time.time()
-        eta = (sum(ok_times) / len(ok_times)) * (total - i) if ok_times else None
-        base_msg = f"بعمل الريل {i+1} من {total}" + (f" — المتبقي تقريبًا {fmt_t(eta)}" if eta else "")
-        prog.update(base_msg, force=True, frac=i / total)
         attempts = [(True, True), (True, False), (False, True), (False, False)]
         if not text_png:
             attempts = [(False, True), (False, False)]
         if not music:
             attempts = [a for a in attempts if not a[1]] or [(False, False)]
             attempts = list(dict.fromkeys(attempts))
-        done_ok, last_err, out_len = False, "", ln / spd
+        done_ok, last_err, out_len, lost = False, "", ln / spd, []
         for (ut, um) in attempts:
             cmd, out_len = build_cmd(src, st, ln, out, P, text_png, music, ut, um)
 
-            def on_frac(f, i=i, base_msg=base_msg):
-                prog.update(f"{base_msg} ({int(f*100)}%)", frac=(i + f) / total)
+            def on_frac(f):
+                with flock:
+                    fracs[i] = f
+                    tot = sum(fracs) / total
+                el = time.time() - t_render
+                eta = el / tot * (1 - tot) if tot > 0.05 else None
+                prog.update(f"بعمل الريلز ({total}) — {int(tot * 100)}%" + (f" — المتبقي تقريبًا {fmt_t(eta)}" if eta else ""),
+                            frac=tot)
 
             rc, err = render_clip(cmd, out_len, on_frac)
             if rc == 0 and os.path.exists(out) and os.path.getsize(out) > 10000:
                 done_ok = True
                 if (text_png and not ut) or (music and not um):
                     lost = [x for x, f in (("النص", text_png and not ut), ("الموسيقى", music and not um)) if f]
-                    say(f"الريل {i+1}: اتعمل لكن من غير {' و'.join(lost)} بسبب مشكلة تقنية.", "warn")
                 break
             last_err = err[-350:]
+        return out, out_len, done_ok, lost, last_err
+
+    prog.update(f"بعمل الريلز ({total})...", force=True, frac=0)
+    if workers > 1:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            results = list(ex.map(render_one, range(total)))
+    else:
+        results = [render_one(i) for i in range(total)]
+    clips = []
+    for i, (out, out_len, done_ok, lost, last_err) in enumerate(results):
         if done_ok:
+            if lost:
+                say(f"الريل {i+1}: اتعمل لكن من غير {' و'.join(lost)} بسبب مشكلة تقنية.", "warn")
             clips.append((out, out_len))
-            ok_times.append(time.time() - t1)
             say(f"الريل {i+1} جاهز — {out_len:.1f} ث — {os.path.getsize(out)/1048576:.1f} MB", "ok")
         else:
             say(f"فشل الريل {i+1}: {last_err}", "err")

@@ -7,8 +7,8 @@ android {
         applicationId 'com.reelsmaker.app'
         minSdk 23
         targetSdk 34
-        versionCode 2
-        versionName '2.0'
+        versionCode 3
+        versionName '3.0'
         // بتتحقن وقت البناء على GitHub من الـ Secret (مش متكتوبة في الكود)
         buildConfigField "String", "APP_TOKEN", "\"${project.findProperty('appToken') ?: ''}\""
         buildConfigField "String", "APP_REPO", "\"${project.findProperty('appRepo') ?: ''}\""

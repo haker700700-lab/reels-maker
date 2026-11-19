@@ -1,62 +1,50 @@
 package com.reelsmaker.app;
 
-import android.app.Activity;
-import android.content.ContentResolver;
-import android.content.ContentValues;
 import android.Manifest;
+import android.app.Activity;
+import android.content.ClipboardManager;
+import android.content.Context;
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
-import android.media.MediaScannerConnection;
+import android.graphics.Color;
+import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
-import android.os.Environment;
-import android.provider.MediaStore;
+import android.os.PowerManager;
+import android.provider.Settings;
 import android.text.InputType;
-import android.content.ClipData;
-import android.content.ClipboardManager;
-import android.content.Context;
-import android.graphics.Color;
-import android.graphics.drawable.GradientDrawable;
 import android.view.Gravity;
 import android.view.View;
-import android.view.ViewGroup;
-import android.view.WindowManager;
-import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
+import android.widget.ScrollView;
 import android.widget.TextView;
 
-import org.json.JSONArray;
 import org.json.JSONObject;
 
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
-import java.net.HttpURLConnection;
-import java.net.URL;
-import java.nio.charset.StandardCharsets;
-
-/** صانع الريلز: بيبعت الرابط لـ GitHub Actions، يستنى، وينزّل reels.zip في التنزيلات. مفيش أي مكتبات خارجية. */
+/**
+ * صانع الريلز: بتلصق الرابط وبس. الشغل كله على سيرفرات GitHub المجانية،
+ * ومتابعة العملية والتنزيل بتتم في خدمة خلفية (JobService) بتكمّل حتى لو قفلت الشاشة أو التطبيق أو النت فصل.
+ */
 public class MainActivity extends Activity {
-    static final String API = "https://api.github.com";
-    static final String REPO = BuildConfig.APP_REPO;
-    static final String TOK = BuildConfig.APP_TOKEN;
+    // الإعدادات الأصلية (المصنع)
+    static final String F_N = "5", F_MIN = "15", F_MAX = "25", F_RES = "1080";
+    static final String F_TEXT = "لمشاهدة وتحميل كاملا الرابط في البايو الملف الشخصي";
+    static final boolean F_REV = false, F_MUS = true;
+
     SharedPreferences sp;
     EditText link, count, minL, maxL, text;
-    String resv = "1080";
-    Button q720, q1080;
+    String resv = F_RES;
+    Button q720, q1080, go, last, battery;
     CheckBox reverse, music, rights;
     TextView status;
     ProgressBar bar;
-    Button go, last;
-    volatile boolean busy = false;
+    final SharedPreferences.OnSharedPreferenceChangeListener listener = (p, k) -> runOnUiThread(this::render);
 
     static final int BG = 0xFF0E1224, CARD = 0xFF1A2040, ACC = 0xFF7C5CFF, ACC2 = 0xFF2DD4BF, TXT = 0xFFF1F3FF, DIM = 0xFF8E95B8;
 
@@ -122,7 +110,7 @@ public class MainActivity extends Activity {
         b.setText(s);
         b.setAllCaps(false);
         b.setTextColor(TXT);
-        b.setTextSize(14);
+        b.setTextSize(13);
         b.setBackground(shape(on ? ACC : CARD, 12));
         b.setStateListAnimator(null);
         return b;
@@ -134,18 +122,34 @@ public class MainActivity extends Activity {
         q1080.setBackground(shape("1080".equals(r) ? ACC : CARD, 12));
     }
 
+    /** القيمة الافتراضية المحفوظة (أو الأصلية لو ما حفظتش). */
+    String dflt(String k, String factory) { return sp.getString("d_" + k, factory); }
+
+    void applyValues(String n, String mn, String mx, String res, String txt, boolean rev, boolean mus) {
+        count.setText(n);
+        minL.setText(mn);
+        maxL.setText(mx);
+        setRes(res);
+        text.setText(txt);
+        reverse.setChecked(rev);
+        music.setChecked(mus);
+    }
+
     @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
         sp = getSharedPreferences("reels", MODE_PRIVATE);
         getWindow().setStatusBarColor(BG);
         getWindow().setNavigationBarColor(BG);
-        getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN);
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.setBackgroundColor(BG);
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(BG);
         root.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
         root.setPadding(dp(18), dp(22), dp(18), dp(14));
+        scroll.addView(root);
 
         TextView title = new TextView(this);
         title.setText("🎬 صانع الريلز");
@@ -155,7 +159,7 @@ public class MainActivity extends Activity {
         title.setGravity(Gravity.CENTER);
         root.addView(title);
         TextView sub = new TextView(this);
-        sub.setText("الصق أي رابط فيه فيديو — والشغل كله على السيرفر");
+        sub.setText("الصق أي رابط فيه فيديو — والشغل كله على السيرفر وبيكمّل حتى لو قفلت التطبيق");
         sub.setTextSize(12);
         sub.setTextColor(DIM);
         sub.setGravity(Gravity.CENTER);
@@ -179,7 +183,7 @@ public class MainActivity extends Activity {
         LinearLayout nr = new LinearLayout(this);
         String[] lbls = {"عدد الريلز", "أقل مدة (ث)", "أقصى مدة (ث)"};
         EditText[] es = new EditText[3];
-        String[] vals = {sp.getString("n", "5"), sp.getString("min", "15"), sp.getString("max", "25")};
+        String[] vals = {sp.getString("n", dflt("n", F_N)), sp.getString("min", dflt("min", F_MIN)), sp.getString("max", dflt("max", F_MAX))};
         for (int i = 0; i < 3; i++) {
             LinearLayout c = new LinearLayout(this);
             c.setOrientation(LinearLayout.VERTICAL);
@@ -187,7 +191,9 @@ public class MainActivity extends Activity {
             es[i].setGravity(Gravity.CENTER);
             nr.addView(c, lp(0, -2, 1, 3));
         }
-        count = es[0]; minL = es[1]; maxL = es[2];
+        count = es[0];
+        minL = es[1];
+        maxL = es[2];
         root.addView(nr);
 
         label(root, "الجودة");
@@ -199,15 +205,47 @@ public class MainActivity extends Activity {
         qr.addView(q1080, lp(0, dp(42), 1, 3));
         qr.addView(q720, lp(0, dp(42), 1, 3));
         root.addView(qr);
-        setRes(sp.getString("res", "1080"));
+        setRes(sp.getString("res", dflt("res", F_RES)));
 
-        text = field(root, "النص العربي على الفيديو",
-                sp.getString("text", "لمشاهدة وتحميل كاملا الرابط في البايو الملف الشخصي"), InputType.TYPE_CLASS_TEXT);
+        text = field(root, "النص العربي على الفيديو (سطر واحد)", sp.getString("text", dflt("text", F_TEXT)), InputType.TYPE_CLASS_TEXT);
 
         LinearLayout cr = new LinearLayout(this);
-        reverse = check(cr, "عكس الفيديو", sp.getBoolean("rev", false));
-        music = check(cr, "موسيقى هادئة", sp.getBoolean("mus", true));
+        reverse = check(cr, "عكس الفيديو", sp.getBoolean("rev", sp.getBoolean("d_rev", F_REV)));
+        music = check(cr, "موسيقى هادئة", sp.getBoolean("mus", sp.getBoolean("d_mus", F_MUS)));
         root.addView(cr);
+
+        // الإعدادات الافتراضية: بتغيّر الرابط بس كل مرة
+        label(root, "⚙️ الإعدادات الافتراضية");
+        LinearLayout dr = new LinearLayout(this);
+        Button saveDef = pill("💾 حفظ كافتراضي", false);
+        Button resetDef = pill("↩️ رجوع للافتراضي", false);
+        Button factory = pill("🏭 الأصلية", false);
+        dr.addView(saveDef, lp(0, dp(42), 1, 2));
+        dr.addView(resetDef, lp(0, dp(42), 1, 2));
+        dr.addView(factory, lp(0, dp(42), 1, 2));
+        root.addView(dr);
+        saveDef.setOnClickListener(v -> {
+            sp.edit().putString("d_n", count.getText().toString().trim())
+                    .putString("d_min", minL.getText().toString().trim())
+                    .putString("d_max", maxL.getText().toString().trim())
+                    .putString("d_res", resv)
+                    .putString("d_text", text.getText().toString())
+                    .putBoolean("d_rev", reverse.isChecked())
+                    .putBoolean("d_mus", music.isChecked()).apply();
+            status.setText("💾 اتحفظت كإعدادات افتراضية. من دلوقتي كل اللي تغيّره هو الرابط بس.");
+        });
+        resetDef.setOnClickListener(v -> {
+            applyValues(dflt("n", F_N), dflt("min", F_MIN), dflt("max", F_MAX), dflt("res", F_RES), dflt("text", F_TEXT),
+                    sp.getBoolean("d_rev", F_REV), sp.getBoolean("d_mus", F_MUS));
+            status.setText("↩️ رجعت الإعدادات الافتراضية.");
+        });
+        factory.setOnClickListener(v -> {
+            SharedPreferences.Editor e = sp.edit();
+            e.remove("d_n").remove("d_min").remove("d_max").remove("d_res").remove("d_text").remove("d_rev").remove("d_mus").apply();
+            applyValues(F_N, F_MIN, F_MAX, F_RES, F_TEXT, F_REV, F_MUS);
+            status.setText("🏭 رجعت الإعدادات الأصلية.");
+        });
+
         rights = check(root, "أؤكد أني أملك حقوق الفيديو أو مصرّح لي", false);
 
         go = new Button(this);
@@ -224,6 +262,13 @@ public class MainActivity extends Activity {
         gl.topMargin = dp(10);
         root.addView(go, gl);
 
+        TextView eta = new TextView(this);
+        eta.setText("⏱ الوقت المتوقع: من 3 لـ 8 دقايق (حتى لو الفيديو ساعتين)");
+        eta.setTextSize(11);
+        eta.setTextColor(DIM);
+        eta.setGravity(Gravity.CENTER);
+        root.addView(eta);
+
         bar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         bar.setIndeterminate(true);
         bar.setIndeterminateTintList(android.content.res.ColorStateList.valueOf(ACC2));
@@ -234,9 +279,10 @@ public class MainActivity extends Activity {
         status.setTextSize(12);
         status.setTextIsSelectable(true);
         status.setGravity(Gravity.CENTER);
-        status.setMaxLines(14);
+        status.setPadding(0, dp(8), 0, dp(8));
         status.setText("جاهز.");
-        root.addView(status, lp(-1, 0, 1, 0));
+        root.addView(status, lp(-1, -2, 0, 0));
+
         last = new Button(this);
         last.setText("⬇️ نزّل آخر ملف جاهز");
         last.setAllCaps(false);
@@ -246,97 +292,111 @@ public class MainActivity extends Activity {
         last.setStateListAnimator(null);
         root.addView(last, lp(-1, dp(42), 0, 0));
 
+        battery = pill("🔋 اسمح للتطبيق يشتغل في الخلفية بدون قيود", false);
+        LinearLayout.LayoutParams bl = lp(-1, dp(42), 0, 0);
+        bl.topMargin = dp(8);
+        root.addView(battery, bl);
+        battery.setOnClickListener(v -> askBattery());
+
         go.setOnClickListener(v -> start());
         last.setOnClickListener(v -> downloadLast());
-        setContentView(root);
-    }
+        setContentView(scroll);
 
-    // ───────── أدوات ─────────
-    void ui(String s) { runOnUiThread(() -> status.setText(s)); }
-
-    void busy(boolean on) {
-        busy = on;
-        runOnUiThread(() -> {
-            bar.setVisibility(on ? View.VISIBLE : View.GONE);
-            go.setEnabled(!on);
-            last.setEnabled(!on);
-            if (on) getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-            else getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        });
-    }
-
-    void saveSettings() {
-        sp.edit().putString("n", count.getText().toString().trim())
-                .putString("min", minL.getText().toString().trim())
-                .putString("max", maxL.getText().toString().trim())
-                .putString("res", resv)
-                .putString("text", text.getText().toString())
-                .putBoolean("rev", reverse.isChecked())
-                .putBoolean("mus", music.isChecked()).apply();
-    }
-
-    /** returns {code, body} */
-    String[] http(String method, String url, String body, String accept) throws Exception {
-        HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
-        c.setRequestMethod(method);
-        c.setConnectTimeout(20000);
-        c.setReadTimeout(30000);
-        c.setRequestProperty("Authorization", "Bearer " + TOK);
-        c.setRequestProperty("Accept", accept == null ? "application/vnd.github+json" : accept);
-        c.setRequestProperty("X-GitHub-Api-Version", "2022-11-28");
-        c.setRequestProperty("User-Agent", "ReelsMaker-App");
-        if (body != null) {
-            c.setDoOutput(true);
-            c.setRequestProperty("Content-Type", "application/json");
-            try (OutputStream o = c.getOutputStream()) { o.write(body.getBytes(StandardCharsets.UTF_8)); }
+        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 11);
+        } else if (Build.VERSION.SDK_INT < 29 && checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, 7);
         }
-        int code = c.getResponseCode();
-        InputStream is = code >= 400 ? c.getErrorStream() : c.getInputStream();
-        StringBuilder sb = new StringBuilder();
-        if (is != null) {
-            try (BufferedReader r = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
-                String ln;
-                while ((ln = r.readLine()) != null) sb.append(ln).append('\n');
-            }
-        }
-        return new String[]{String.valueOf(code), sb.toString()};
     }
 
-    String explain(String[] x) {
-        String c = x[0];
-        if ("401".equals(c)) return "الخدمة مش متاحة حاليًا (التوكن منتهي). كلّم صاحب التطبيق.";
-        if ("403".equals(c)) return "الخدمة مشغولة أو متوقفة مؤقتًا — جرّب بعد شوية.";
-        if ("404".equals(c)) return "الخدمة مش موجودة (المستودع أو الملف).";
-        return "خطأ " + c + ": " + x[1].replace('\n', ' ');
+    @Override
+    protected void onResume() {
+        super.onResume();
+        sp.registerOnSharedPreferenceChangeListener(listener);
+        // لو في عملية شغّالة والخدمة اتقتلت (مثلًا من النظام)، نشغّلها تاني
+        if (isRunning() && !JobService.alive) startJobService();
+        render();
+    }
+
+    @Override
+    protected void onPause() {
+        sp.unregisterOnSharedPreferenceChangeListener(listener);
+        super.onPause();
+    }
+
+    // ───────── العرض ─────────
+    boolean isRunning() {
+        String st = sp.getString("stage", "");
+        return "NEW".equals(st) || "RUNNING".equals(st);
+    }
+
+    void render() {
+        boolean run = isRunning();
+        go.setEnabled(!run);
+        last.setEnabled(!run);
+        bar.setVisibility(run ? View.VISIBLE : View.INVISIBLE);
+        String m = sp.getString("msg", "");
+        if (!m.isEmpty()) status.setText(m);
+        boolean ignoring = true;
+        if (Build.VERSION.SDK_INT >= 23) {
+            PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+            ignoring = pm == null || pm.isIgnoringBatteryOptimizations(getPackageName());
+        }
+        battery.setVisibility(ignoring ? View.GONE : View.VISIBLE);
+    }
+
+    void askBattery() {
+        try {
+            Intent i = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:" + getPackageName()));
+            startActivity(i);
+        } catch (Throwable e) {
+            try {
+                startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));
+            } catch (Throwable ignored) { }
+        }
     }
 
     boolean noService() {
-        if (TOK.isEmpty() || REPO.isEmpty()) {
-            ui("التطبيق اتبنى من غير بيانات الخدمة. اعمل بناء جديد من صاحب التطبيق.");
+        if (Gh.TOK.isEmpty() || Gh.REPO.isEmpty()) {
+            status.setText("التطبيق اتبنى من غير بيانات الخدمة. اعمل بناء جديد من صاحب التطبيق.");
             return true;
         }
         return false;
     }
 
-    /** بيدوّر على تشغيل بنفس رقم العملية بتاعنا (كل مستخدم له رقم مختلف، فمفيش خلط). */
-    long findRun(String job) throws Exception {
-        String[] x = http("GET", API + "/repos/" + REPO + "/actions/workflows/reels.yml/runs?per_page=30", null, null);
-        if (!"200".equals(x[0])) throw new Exception(explain(x));
-        JSONArray a = new JSONObject(x[1]).getJSONArray("workflow_runs");
-        for (int i = 0; i < a.length(); i++) {
-            JSONObject o = a.getJSONObject(i);
-            if (("reels " + job).equals(o.optString("display_title"))) return o.getLong("id");
+    int num(EditText e, int d, int lo, int hi) {
+        try {
+            int v = Integer.parseInt(e.getText().toString().trim());
+            return Math.max(lo, Math.min(hi, v));
+        } catch (Exception x) {
+            return d;
         }
-        return 0;
+    }
+
+    void startJobService() {
+        try {
+            Intent i = new Intent(this, JobService.class);
+            if (Build.VERSION.SDK_INT >= 26) startForegroundService(i);
+            else startService(i);
+        } catch (Throwable e) {
+            status.setText("❌ مقدرتش أشغّل الخدمة الخلفية: " + e.getClass().getSimpleName());
+        }
     }
 
     // ───────── التشغيل ─────────
     void start() {
-        if (busy || noService()) return;
+        if (isRunning() || noService()) return;
         final String url = link.getText().toString().trim();
-        if (url.isEmpty()) { ui("الصق رابط الفيديو الأول."); return; }
-        if (!rights.isChecked()) { ui("علّم على «أؤكد أني أملك حقوق الفيديو»."); return; }
-        saveSettings();
+        if (url.isEmpty()) { status.setText("الصق رابط الفيديو الأول."); return; }
+        if (!rights.isChecked()) { status.setText("علّم على «أؤكد أني أملك حقوق الفيديو»."); return; }
+        int n = num(count, 5, 1, 30), mn = num(minL, 15, 3, 600), mx = num(maxL, 25, 3, 600);
+        if (mx < mn) { int t = mn; mn = mx; mx = t; }
+        count.setText(String.valueOf(n));
+        minL.setText(String.valueOf(mn));
+        maxL.setText(String.valueOf(mx));
+        sp.edit().putString("n", String.valueOf(n)).putString("min", String.valueOf(mn)).putString("max", String.valueOf(mx))
+                .putString("res", resv).putString("text", text.getText().toString())
+                .putBoolean("rev", reverse.isChecked()).putBoolean("mus", music.isChecked()).apply();
         final String job = java.util.UUID.randomUUID().toString().replace("-", "").substring(0, 12);
         final String body;
         try {
@@ -344,184 +404,31 @@ public class MainActivity extends Activity {
             in.put("job", job);
             in.put("url", url);
             in.put("rights", "true");
-            in.put("n", count.getText().toString().trim());
-            in.put("min_l", minL.getText().toString().trim());
-            in.put("max_l", maxL.getText().toString().trim());
+            in.put("n", String.valueOf(n));
+            in.put("min_l", String.valueOf(mn));
+            in.put("max_l", String.valueOf(mx));
             in.put("res", resv);
             in.put("reverse", String.valueOf(reverse.isChecked()));
             in.put("text", text.getText().toString());
             in.put("music", String.valueOf(music.isChecked()));
             body = new JSONObject().put("ref", "main").put("inputs", in).toString();
-        } catch (Exception e) { ui("خطأ في الإعدادات."); return; }
+        } catch (Exception e) { status.setText("خطأ في الإعدادات."); return; }
 
-        busy(true);
-        new Thread(() -> {
-            try {
-                ui("ببعت الطلب للسيرفر...");
-                String[] d = http("POST", API + "/repos/" + REPO + "/actions/workflows/reels.yml/dispatches", body, null);
-                if (!"204".equals(d[0])) throw new Exception(explain(d));
-                sp.edit().putString("job", job).apply();
-                track(job);
-            } catch (Exception e) {
-                ui("❌ " + e.getMessage());
-            } finally { busy(false); }
-        }).start();
-    }
-
-    /** بيتابع العملية لحد ما تخلص وبعدين ينزّل الملف. */
-    void track(String job) throws Exception {
-        long id = 0;
-        for (int i = 0; i < 90 && id == 0; i++) {
-            id = findRun(job);
-            if (id == 0) Thread.sleep(2000);
-        }
-        if (id == 0) throw new Exception("السيرفر ما بدأش الشغل — جرّب تاني.");
-        long t0 = System.currentTimeMillis();
-        while (true) {
-            String[] s = http("GET", API + "/repos/" + REPO + "/actions/runs/" + id, null, null);
-            if (!"200".equals(s[0])) throw new Exception(explain(s));
-            JSONObject j = new JSONObject(s[1]);
-            String st = j.getString("status");
-            long mins = (System.currentTimeMillis() - t0) / 60000;
-            if ("completed".equals(st)) {
-                String con = j.optString("conclusion");
-                if ("success".equals(con)) break;
-                throw new Exception(failReason(job, con));
-            }
-            ui("☁️ السيرفر شغّال... (" + mins + " د) — تقدر تسيب التطبيق وترجع تدوس «نزّل آخر ملف»");
-            if (mins > 100) throw new Exception("الشغل طوّل أوي.");
-            Thread.sleep(5000);
-        }
-        downloadTag("reels-" + job);
-    }
-
-    /** بيجيب سبب الفشل الحقيقي اللي السيرفر سجّله. */
-    String failReason(String job, String con) {
-        try {
-            String[] x = http("GET", API + "/repos/" + REPO + "/releases/tags/err-" + job, null, null);
-            if ("200".equals(x[0])) {
-                String b = new JSONObject(x[1]).optString("body", "").trim();
-                if (!b.isEmpty()) return b.length() > 700 ? b.substring(0, 700) : b;
-            }
-        } catch (Exception ignored) { }
-        return "الشغل فشل (" + con + "). جرّب رابط تاني.";
+        // كل حالة العملية بتتحفظ، فالخدمة تكمّل لو اتقتلت أو الجهاز اتعاد تشغيله
+        sp.edit().putString("job", job).putString("body", body).putString("stage", "NEW")
+                .putBoolean("posted", false).putLong("t0", System.currentTimeMillis())
+                .putString("msg", "ببعت الطلب للسيرفر...").putInt("pct", 0).apply();
+        link.setText("");   // الرابط الجاي جديد؛ باقي الإعدادات زي ما هي
+        startJobService();
+        render();
     }
 
     void downloadLast() {
-        if (busy || noService()) return;
-        final String job = sp.getString("job", "");
-        if (job.isEmpty()) { ui("لسه معملتش أي عملية."); return; }
-        busy(true);
-        new Thread(() -> {
-            try {
-                ui("بتأكد من آخر عملية...");
-                track(job);
-            } catch (Exception e) {
-                ui("❌ " + e.getMessage());
-            } finally { busy(false); }
-        }).start();
-    }
-
-    void downloadTag(String tag) throws Exception {
-        String r = REPO;
-        String[] x = http("GET", API + "/repos/" + r + "/releases/tags/" + tag, null, null);
-        if (!"200".equals(x[0])) throw new Exception(explain(x));
-        JSONArray assets = new JSONObject(x[1]).getJSONArray("assets");
-        long aid = 0;
-        for (int i = 0; i < assets.length(); i++) {
-            JSONObject o = assets.getJSONObject(i);
-            if ("reels.zip".equals(o.getString("name"))) aid = o.getLong("id");
-        }
-        if (aid == 0) throw new Exception("ملف reels.zip مش موجود في الإصدار.");
-        save(r, aid, tag + ".zip");
-    }
-
-    /** بينزّل الملف (من غير ما نبعت التوكن للسيرفر التاني بتاع التخزين) ويحفظه في التنزيلات. */
-    void save(String r, long assetId, String name) throws Exception {
-        ui("⬇️ بنزّل " + name + " ...");
-        HttpURLConnection c = (HttpURLConnection) new URL(API + "/repos/" + r + "/releases/assets/" + assetId).openConnection();
-        c.setInstanceFollowRedirects(false);
-        c.setRequestProperty("Authorization", "Bearer " + TOK);
-        c.setRequestProperty("Accept", "application/octet-stream");
-        c.setRequestProperty("User-Agent", "ReelsMaker-App");
-        c.setConnectTimeout(20000);
-        c.setReadTimeout(60000);
-        int code = c.getResponseCode();
-        HttpURLConnection d = c;
-        if (code >= 300 && code < 400) {
-            String loc = c.getHeaderField("Location");
-            d = (HttpURLConnection) new URL(loc).openConnection();
-            d.setConnectTimeout(20000);
-            d.setReadTimeout(60000);
-            d.setRequestProperty("User-Agent", "ReelsMaker-App");
-            code = d.getResponseCode();
-        }
-        if (code != 200) throw new Exception("فشل التنزيل (" + code + ").");
-        long total = d.getContentLength();
-
-        if (Build.VERSION.SDK_INT >= 29) {
-            storeMediaStore(d, name, total);
-        } else {
-            storeLegacy(d, name, total);
-        }
-        ui("✅ خلصنا! الملف في «التنزيلات»: " + name);
-    }
-
-    void progress(long done, long total) {
-        ui("⬇️ " + (done >> 20) + (total > 0 ? " / " + (total >> 20) : "") + " MB");
-    }
-
-    /** أندرويد 10 وما فوق: المكان العام «التنزيلات» من غير صلاحيات. */
-    @android.annotation.TargetApi(29)
-    void storeMediaStore(HttpURLConnection d, String name, long total) throws Exception {
-        ContentResolver cr = getContentResolver();
-        ContentValues v = new ContentValues();
-        v.put(MediaStore.Downloads.DISPLAY_NAME, name);
-        v.put(MediaStore.Downloads.MIME_TYPE, "application/zip");
-        v.put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS);
-        v.put(MediaStore.Downloads.IS_PENDING, 1);
-        Uri uri = cr.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, v);
-        if (uri == null) throw new Exception("مقدرتش أكتب في التنزيلات.");
-        try (InputStream in = d.getInputStream(); OutputStream out = cr.openOutputStream(uri)) {
-            copy(in, out, total);
-        } catch (Exception e) {
-            cr.delete(uri, null, null);
-            throw e;
-        }
-        v.clear();
-        v.put(MediaStore.Downloads.IS_PENDING, 0);
-        cr.update(uri, v, null, null);
-    }
-
-    /** أندرويد 6 لـ 9: بنكتب في مجلد التنزيلات مباشرة بعد إذن التخزين. */
-    void storeLegacy(HttpURLConnection d, String name, long total) throws Exception {
-        if (checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
-            runOnUiThread(() -> requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, 7));
-            throw new Exception("اسمح للتطبيق بالتخزين (النافذة اللي ظهرت)، وبعدين دوس «نزّل آخر ملف جاهز».");
-        }
-        File dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
-        if (!dir.exists() && !dir.mkdirs()) throw new Exception("مقدرتش أعمل مجلد التنزيلات.");
-        File f = new File(dir, name);
-        try (InputStream in = d.getInputStream(); OutputStream out = new FileOutputStream(f)) {
-            copy(in, out, total);
-        } catch (Exception e) {
-            f.delete();
-            throw e;
-        }
-        MediaScannerConnection.scanFile(this, new String[]{f.getAbsolutePath()}, new String[]{"application/zip"}, null);
-    }
-
-    void copy(InputStream in, OutputStream out, long total) throws Exception {
-        byte[] buf = new byte[1 << 16];
-        long done = 0, lastShown = 0;
-        int n;
-        while ((n = in.read(buf)) > 0) {
-            out.write(buf, 0, n);
-            done += n;
-            if (done - lastShown > (1 << 20)) {
-                lastShown = done;
-                progress(done, total);
-            }
-        }
+        if (isRunning() || noService()) return;
+        if (sp.getString("job", "").isEmpty()) { status.setText("لسه معملتش أي عملية."); return; }
+        sp.edit().putString("stage", "RUNNING").putString("msg", "بتأكد من آخر عملية...").putInt("pct", 0)
+                .putLong("t0", System.currentTimeMillis()).apply();
+        startJobService();
+        render();
     }
 }

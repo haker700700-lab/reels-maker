@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """بيحوّل مدخلات GitHub Actions (من متغيرات البيئة) لملف settings.json — من غير ما نحط نصوص المستخدم في أمر shell."""
-import json, os
+import hashlib, json, os
 
 def env(k, d=""):
     return os.environ.get(k, d)
@@ -30,3 +30,12 @@ if cookies.strip():
 with open("settings.json", "w", encoding="utf-8") as f:
     json.dump(S, f, ensure_ascii=False)
 print("settings ok (الرابط مش بيتطبع عشان المستودع عام)")
+
+# بصمة الطلب (الرابط + الإعدادات): نفس الرابط بنفس الإعدادات = نفس الريلز، فمنعيدش الشغل ولا بنكرر حاجة
+key = json.dumps([S["url"], S["n"], S["min_l"], S["max_l"], S["res"], S["reverse"], S["text"], S["music_on"]],
+                 ensure_ascii=False, sort_keys=True)
+digest = hashlib.sha256(key.encode("utf-8")).hexdigest()[:20]
+out = os.environ.get("GITHUB_OUTPUT")
+if out:
+    with open(out, "a", encoding="utf-8") as f:
+        f.write("hash=" + digest + "\n")
