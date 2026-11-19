@@ -15,6 +15,7 @@ import android.os.Bundle;
 import android.os.PowerManager;
 import android.provider.Settings;
 import android.text.InputType;
+import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
@@ -22,7 +23,6 @@ import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
-import android.widget.ScrollView;
 import android.widget.TextView;
 
 import org.json.JSONObject;
@@ -30,17 +30,13 @@ import org.json.JSONObject;
 /**
  * صانع الريلز: بتلصق الرابط وبس. الشغل كله على سيرفرات GitHub المجانية،
  * ومتابعة العملية والتنزيل بتتم في خدمة خلفية (JobService) بتكمّل حتى لو قفلت الشاشة أو التطبيق أو النت فصل.
+ * الصفحة الرئيسية ثابتة على شاشة واحدة (من غير أي تمرير طلوع أو نزول). الخصائص في شاشة مستقلة (FeaturesActivity).
  */
 public class MainActivity extends Activity {
-    // الإعدادات الأصلية (المصنع)
-    static final String F_N = "5", F_MIN = "15", F_MAX = "25", F_RES = "1080";
-    static final String F_TEXT = "لمشاهدة وتحميل كاملا الرابط في البايو الملف الشخصي";
-    static final boolean F_REV = false, F_MUS = true;
-
     SharedPreferences sp;
     EditText link, count, minL, maxL, text;
-    String resv = F_RES;
-    Button q720, q1080, go, last, battery;
+    String resv = Feat.F_RES;
+    Button q720, q1080, go, last, battery, feats;
     CheckBox reverse, music, rights;
     TextView status;
     ProgressBar bar;
@@ -60,9 +56,10 @@ public class MainActivity extends Activity {
     TextView label(LinearLayout p, String s) {
         TextView t = new TextView(this);
         t.setText(s);
-        t.setTextSize(12);
+        t.setTextSize(11);
         t.setTextColor(DIM);
-        t.setPadding(dp(4), dp(8), dp(4), dp(3));
+        t.setSingleLine(true);
+        t.setPadding(dp(4), dp(4), dp(4), dp(2));
         p.addView(t);
         return t;
     }
@@ -75,7 +72,7 @@ public class MainActivity extends Activity {
         e.setSingleLine(true);
         e.setTextColor(TXT);
         e.setHintTextColor(DIM);
-        e.setTextSize(15);
+        e.setTextSize(14);
         e.setBackground(shape(CARD, 12));
         e.setPadding(dp(12), 0, dp(12), 0);
         return e;
@@ -90,7 +87,7 @@ public class MainActivity extends Activity {
     EditText field(LinearLayout p, String lbl, String val, int type) {
         label(p, lbl);
         EditText e = box("", val, type);
-        p.addView(e, lp(-1, dp(46), 0, 0));
+        p.addView(e, lp(-1, dp(40), 0, 0));
         return e;
     }
 
@@ -101,7 +98,8 @@ public class MainActivity extends Activity {
         c.setTextColor(TXT);
         c.setTextSize(13);
         c.setButtonTintList(android.content.res.ColorStateList.valueOf(ACC2));
-        p.addView(c, lp(-2, -2, 1, 0));
+        // جوه صف أفقي: بياخد نصيبه بالتساوي. جوه عمود رأسي: مفيش وزن (عشان ما ياخدش من مساحة الحالة)
+        p.addView(c, lp(-2, dp(36), p.getOrientation() == LinearLayout.HORIZONTAL ? 1 : 0, 0));
         return c;
     }
 
@@ -111,61 +109,74 @@ public class MainActivity extends Activity {
         b.setAllCaps(false);
         b.setTextColor(TXT);
         b.setTextSize(13);
+        b.setMinHeight(0);
+        b.setMinimumHeight(0);
         b.setBackground(shape(on ? ACC : CARD, 12));
         b.setStateListAnimator(null);
         return b;
     }
 
     void setRes(String r) {
-        resv = r;
-        q720.setBackground(shape("720".equals(r) ? ACC : CARD, 12));
-        q1080.setBackground(shape("1080".equals(r) ? ACC : CARD, 12));
+        resv = "720".equals(r) ? "720" : "1080";
+        q720.setBackground(shape("720".equals(resv) ? ACC : CARD, 12));
+        q1080.setBackground(shape("1080".equals(resv) ? ACC : CARD, 12));
     }
 
-    /** القيمة الافتراضية المحفوظة (أو الأصلية لو ما حفظتش). */
-    String dflt(String k, String factory) { return sp.getString("d_" + k, factory); }
+    /** بيحمّل القيم (الحالية، وإلا الافتراضي المحفوظ، وإلا الأصلي) في الخانات. */
+    void loadFromPrefs() {
+        count.setText(Feat.str(sp, "n", Feat.F_N));
+        minL.setText(Feat.str(sp, "min", Feat.F_MIN));
+        maxL.setText(Feat.str(sp, "max", Feat.F_MAX));
+        setRes(Feat.str(sp, "res", Feat.F_RES));
+        text.setText(Feat.str(sp, "text", Feat.F_TEXT));
+        reverse.setChecked(Feat.bool(sp, "rev", Feat.F_REV));
+        music.setChecked(Feat.bool(sp, "mus", Feat.F_MUS));
+    }
 
-    void applyValues(String n, String mn, String mx, String res, String txt, boolean rev, boolean mus) {
-        count.setText(n);
-        minL.setText(mn);
-        maxL.setText(mx);
-        setRes(res);
-        text.setText(txt);
-        reverse.setChecked(rev);
-        music.setChecked(mus);
+    /** بيحفظ اللي على الشاشة كقيم حالية (عشان شاشة الخصائص تقدر تحفظها كافتراضي). */
+    void saveCurrent() {
+        sp.edit().putString("n", count.getText().toString().trim())
+                .putString("min", minL.getText().toString().trim())
+                .putString("max", maxL.getText().toString().trim())
+                .putString("res", resv)
+                .putString("text", text.getText().toString())
+                .putBoolean("rev", reverse.isChecked())
+                .putBoolean("mus", music.isChecked()).apply();
     }
 
     @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
         sp = getSharedPreferences("reels", MODE_PRIVATE);
+        if (!sp.contains("v4")) {
+            // مرة واحدة بس: الموسيقى بقت اختيارية ومقفولة من الأصل
+            sp.edit().remove("mus").remove("d_mus").putBoolean("v4", true).apply();
+        }
         getWindow().setStatusBarColor(BG);
         getWindow().setNavigationBarColor(BG);
-        ScrollView scroll = new ScrollView(this);
-        scroll.setFillViewport(true);
-        scroll.setBackgroundColor(BG);
+
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(BG);
         root.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
-        root.setPadding(dp(18), dp(22), dp(18), dp(14));
-        scroll.addView(root);
+        root.setPadding(dp(16), dp(12), dp(16), dp(10));
 
         TextView title = new TextView(this);
         title.setText("🎬 صانع الريلز");
-        title.setTextSize(26);
+        title.setTextSize(22);
         title.setTextColor(TXT);
         title.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
         title.setGravity(Gravity.CENTER);
         root.addView(title);
         TextView sub = new TextView(this);
-        sub.setText("الصق أي رابط فيه فيديو — والشغل كله على السيرفر وبيكمّل حتى لو قفلت التطبيق");
-        sub.setTextSize(12);
+        sub.setText("الصق الرابط — والشغل كله على السيرفر");
+        sub.setTextSize(11);
         sub.setTextColor(DIM);
         sub.setGravity(Gravity.CENTER);
+        sub.setSingleLine(true);
         root.addView(sub);
 
-        label(root, "🔗 رابط الفيديو (مباشر • تحميل • توكن • صفحة)");
+        label(root, "🔗 رابط الفيديو");
         LinearLayout lr = new LinearLayout(this);
         link = box("https://...", "", InputType.TYPE_TEXT_VARIATION_URI);
         Button paste = pill("لصق", true);
@@ -176,18 +187,17 @@ public class MainActivity extends Activity {
                 if (t != null) link.setText(t.toString().trim());
             }
         });
-        lr.addView(link, lp(0, dp(46), 1, 0));
-        lr.addView(paste, lp(dp(64), dp(46), 0, 0));
+        lr.addView(link, lp(0, dp(44), 1, 0));
+        lr.addView(paste, lp(dp(64), dp(44), 0, 0));
         root.addView(lr);
 
         LinearLayout nr = new LinearLayout(this);
         String[] lbls = {"عدد الريلز", "أقل مدة (ث)", "أقصى مدة (ث)"};
         EditText[] es = new EditText[3];
-        String[] vals = {sp.getString("n", dflt("n", F_N)), sp.getString("min", dflt("min", F_MIN)), sp.getString("max", dflt("max", F_MAX))};
         for (int i = 0; i < 3; i++) {
             LinearLayout c = new LinearLayout(this);
             c.setOrientation(LinearLayout.VERTICAL);
-            es[i] = field(c, lbls[i], vals[i], InputType.TYPE_CLASS_NUMBER);
+            es[i] = field(c, lbls[i], "", InputType.TYPE_CLASS_NUMBER);
             es[i].setGravity(Gravity.CENTER);
             nr.addView(c, lp(0, -2, 1, 3));
         }
@@ -196,57 +206,38 @@ public class MainActivity extends Activity {
         maxL = es[2];
         root.addView(nr);
 
-        label(root, "الجودة");
         LinearLayout qr = new LinearLayout(this);
+        qr.setGravity(Gravity.CENTER_VERTICAL);
+        TextView ql = new TextView(this);
+        ql.setText("الجودة");
+        ql.setTextSize(12);
+        ql.setTextColor(DIM);
+        ql.setPadding(dp(4), 0, dp(8), 0);
+        qr.addView(ql);
         q1080 = pill("1080 · عالية", true);
         q720 = pill("720 · أسرع", false);
         q1080.setOnClickListener(v -> setRes("1080"));
         q720.setOnClickListener(v -> setRes("720"));
-        qr.addView(q1080, lp(0, dp(42), 1, 3));
-        qr.addView(q720, lp(0, dp(42), 1, 3));
-        root.addView(qr);
-        setRes(sp.getString("res", dflt("res", F_RES)));
+        qr.addView(q1080, lp(0, dp(38), 1, 3));
+        qr.addView(q720, lp(0, dp(38), 1, 3));
+        LinearLayout.LayoutParams qlp = lp(-1, -2, 0, 0);
+        qlp.topMargin = dp(6);
+        root.addView(qr, qlp);
 
-        text = field(root, "النص العربي على الفيديو (سطر واحد)", sp.getString("text", dflt("text", F_TEXT)), InputType.TYPE_CLASS_TEXT);
+        text = field(root, "النص العربي على الفيديو (سطر واحد)", "", InputType.TYPE_CLASS_TEXT);
 
         LinearLayout cr = new LinearLayout(this);
-        reverse = check(cr, "عكس الفيديو", sp.getBoolean("rev", sp.getBoolean("d_rev", F_REV)));
-        music = check(cr, "موسيقى هادئة", sp.getBoolean("mus", sp.getBoolean("d_mus", F_MUS)));
+        reverse = check(cr, "عكس الفيديو", false);
+        music = check(cr, "موسيقى خلفية", false);
         root.addView(cr);
 
-        // الإعدادات الافتراضية: بتغيّر الرابط بس كل مرة
-        label(root, "⚙️ الإعدادات الافتراضية");
-        LinearLayout dr = new LinearLayout(this);
-        Button saveDef = pill("💾 حفظ كافتراضي", false);
-        Button resetDef = pill("↩️ رجوع للافتراضي", false);
-        Button factory = pill("🏭 الأصلية", false);
-        dr.addView(saveDef, lp(0, dp(42), 1, 2));
-        dr.addView(resetDef, lp(0, dp(42), 1, 2));
-        dr.addView(factory, lp(0, dp(42), 1, 2));
-        root.addView(dr);
-        saveDef.setOnClickListener(v -> {
-            sp.edit().putString("d_n", count.getText().toString().trim())
-                    .putString("d_min", minL.getText().toString().trim())
-                    .putString("d_max", maxL.getText().toString().trim())
-                    .putString("d_res", resv)
-                    .putString("d_text", text.getText().toString())
-                    .putBoolean("d_rev", reverse.isChecked())
-                    .putBoolean("d_mus", music.isChecked()).apply();
-            status.setText("💾 اتحفظت كإعدادات افتراضية. من دلوقتي كل اللي تغيّره هو الرابط بس.");
-        });
-        resetDef.setOnClickListener(v -> {
-            applyValues(dflt("n", F_N), dflt("min", F_MIN), dflt("max", F_MAX), dflt("res", F_RES), dflt("text", F_TEXT),
-                    sp.getBoolean("d_rev", F_REV), sp.getBoolean("d_mus", F_MUS));
-            status.setText("↩️ رجعت الإعدادات الافتراضية.");
-        });
-        factory.setOnClickListener(v -> {
-            SharedPreferences.Editor e = sp.edit();
-            e.remove("d_n").remove("d_min").remove("d_max").remove("d_res").remove("d_text").remove("d_rev").remove("d_mus").apply();
-            applyValues(F_N, F_MIN, F_MAX, F_RES, F_TEXT, F_REV, F_MUS);
-            status.setText("🏭 رجعت الإعدادات الأصلية.");
-        });
-
         rights = check(root, "أؤكد أني أملك حقوق الفيديو أو مصرّح لي", false);
+
+        feats = pill("✨ الخصائص والإعدادات", false);
+        feats.setOnClickListener(v -> startActivity(new Intent(this, FeaturesActivity.class)));
+        LinearLayout.LayoutParams fl = lp(-1, dp(42), 0, 0);
+        fl.topMargin = dp(4);
+        root.addView(feats, fl);
 
         go = new Button(this);
         go.setText("ابدأ الآن ☁️");
@@ -254,53 +245,54 @@ public class MainActivity extends Activity {
         go.setTextSize(17);
         go.setTextColor(Color.WHITE);
         go.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        go.setMinHeight(0);
+        go.setMinimumHeight(0);
         GradientDrawable gd = new GradientDrawable(GradientDrawable.Orientation.RIGHT_LEFT, new int[]{ACC, ACC2});
         gd.setCornerRadius(dp(14));
         go.setBackground(gd);
         go.setStateListAnimator(null);
-        LinearLayout.LayoutParams gl = lp(-1, dp(54), 0, 0);
-        gl.topMargin = dp(10);
+        LinearLayout.LayoutParams gl = lp(-1, dp(50), 0, 0);
+        gl.topMargin = dp(8);
         root.addView(go, gl);
-
-        TextView eta = new TextView(this);
-        eta.setText("⏱ الوقت المتوقع: من 3 لـ 8 دقايق (حتى لو الفيديو ساعتين)");
-        eta.setTextSize(11);
-        eta.setTextColor(DIM);
-        eta.setGravity(Gravity.CENTER);
-        root.addView(eta);
 
         bar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         bar.setIndeterminate(true);
         bar.setIndeterminateTintList(android.content.res.ColorStateList.valueOf(ACC2));
         bar.setVisibility(View.INVISIBLE);
-        root.addView(bar, lp(-1, dp(4), 0, 0));
+        LinearLayout.LayoutParams bp = lp(-1, dp(4), 0, 0);
+        bp.topMargin = dp(4);
+        root.addView(bar, bp);
+
+        // الحالة: بتاخد المساحة الباقية (مفيش تمرير). اضغط عليها تشوف الرسالة كاملة.
         status = new TextView(this);
         status.setTextColor(TXT);
         status.setTextSize(12);
-        status.setTextIsSelectable(true);
         status.setGravity(Gravity.CENTER);
-        status.setPadding(0, dp(8), 0, dp(8));
-        status.setText("جاهز.");
-        root.addView(status, lp(-1, -2, 0, 0));
+        status.setMaxLines(5);
+        status.setEllipsize(TextUtils.TruncateAt.END);
+        status.setPadding(0, dp(4), 0, dp(4));
+        status.setText("جاهز. ⏱ الوقت المتوقع من 3 لـ 8 دقايق.");
+        status.setOnClickListener(v -> {
+            CharSequence t = status.getText();
+            if (t == null || t.length() == 0) return;
+            new android.app.AlertDialog.Builder(this).setMessage(t).setPositiveButton("تمام", null).show();
+        });
+        LinearLayout.LayoutParams stp = lp(-1, 0, 1, 0);
+        root.addView(status, stp);
 
-        last = new Button(this);
-        last.setText("⬇️ نزّل آخر ملف جاهز");
-        last.setAllCaps(false);
-        last.setTextColor(TXT);
-        last.setTextSize(13);
-        last.setBackground(shape(CARD, 12));
-        last.setStateListAnimator(null);
-        root.addView(last, lp(-1, dp(42), 0, 0));
-
-        battery = pill("🔋 اسمح للتطبيق يشتغل في الخلفية بدون قيود", false);
-        LinearLayout.LayoutParams bl = lp(-1, dp(42), 0, 0);
-        bl.topMargin = dp(8);
-        root.addView(battery, bl);
+        LinearLayout br = new LinearLayout(this);
+        last = pill("⬇️ نزّل آخر ملف جاهز", false);
+        battery = pill("🔋 اسمح بالخلفية", false);
+        br.addView(last, lp(0, dp(40), 1, 2));
+        br.addView(battery, lp(0, dp(40), 1, 2));
+        root.addView(br);
         battery.setOnClickListener(v -> askBattery());
 
         go.setOnClickListener(v -> start());
         last.setOnClickListener(v -> downloadLast());
-        setContentView(scroll);
+        setContentView(root);
+
+        loadFromPrefs();
 
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 11);
@@ -312,6 +304,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        loadFromPrefs();   // لو رجعت من شاشة الخصائص (حفظ/رجوع للافتراضي/الأصلية)
         sp.registerOnSharedPreferenceChangeListener(listener);
         // لو في عملية شغّالة والخدمة اتقتلت (مثلًا من النظام)، نشغّلها تاني
         if (isRunning() && !JobService.alive) startJobService();
@@ -321,6 +314,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onPause() {
         sp.unregisterOnSharedPreferenceChangeListener(listener);
+        saveCurrent();
         super.onPause();
     }
 
@@ -337,6 +331,7 @@ public class MainActivity extends Activity {
         bar.setVisibility(run ? View.VISIBLE : View.INVISIBLE);
         String m = sp.getString("msg", "");
         if (!m.isEmpty()) status.setText(m);
+        feats.setText("✨ الخصائص والإعدادات (" + Feat.enabledCount(sp) + " مفعّلة)");
         boolean ignoring = true;
         if (Build.VERSION.SDK_INT >= 23) {
             PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
@@ -394,9 +389,7 @@ public class MainActivity extends Activity {
         count.setText(String.valueOf(n));
         minL.setText(String.valueOf(mn));
         maxL.setText(String.valueOf(mx));
-        sp.edit().putString("n", String.valueOf(n)).putString("min", String.valueOf(mn)).putString("max", String.valueOf(mx))
-                .putString("res", resv).putString("text", text.getText().toString())
-                .putBoolean("rev", reverse.isChecked()).putBoolean("mus", music.isChecked()).apply();
+        saveCurrent();
         final String job = java.util.UUID.randomUUID().toString().replace("-", "").substring(0, 12);
         final String body;
         try {
@@ -411,6 +404,7 @@ public class MainActivity extends Activity {
             in.put("reverse", String.valueOf(reverse.isChecked()));
             in.put("text", text.getText().toString());
             in.put("music", String.valueOf(music.isChecked()));
+            in.put("feat", Feat.string(sp));
             body = new JSONObject().put("ref", "main").put("inputs", in).toString();
         } catch (Exception e) { status.setText("خطأ في الإعدادات."); return; }
 

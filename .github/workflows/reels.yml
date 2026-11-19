@@ -40,7 +40,10 @@ on:
       music:
         description: "موسيقى هادئة في الخلفية"
         type: boolean
-        default: true
+        default: false
+      feat:
+        description: "الخصائص (crop,best,face,enhance,orig,denoise,fade,musicfile أو none)"
+        default: "crop,best,face,enhance,orig"
 
 permissions:
   contents: write
@@ -64,6 +67,7 @@ jobs:
           IN_REVERSE: ${{ inputs.reverse }}
           IN_TEXT: ${{ inputs.text }}
           IN_MUSIC: ${{ inputs.music }}
+          IN_FEAT: ${{ inputs.feat }}
           YT_COOKIES: ${{ secrets.YT_COOKIES }}
         run: python3 cloud/make_settings.py
 
@@ -80,7 +84,7 @@ jobs:
             src=$(gh release view "h-$HASH" --json body --jq .body 2>/dev/null | tr -d '[:space:]' || true)
             if [[ "$src" =~ ^reels-[A-Za-z0-9._-]+$ ]]; then
               mkdir -p cached
-              if gh release download "$src" --dir cached --pattern 'reels.zip' --pattern 'reel_*.mp4' >/dev/null 2>&1 && [ -s cached/reels.zip ]; then
+              if gh release download "$src" --dir cached --pattern 'reels.zip' --pattern 'reel_*.mp4' --pattern 'music.m4a' >/dev/null 2>&1 && [ -s cached/reels.zip ]; then
                 hit=true
                 echo "dir=$PWD/cached" >> "$GITHUB_OUTPUT"
                 echo "♻️ الرابط ده اتعمل قبل كده بنفس الإعدادات — هنستخدم نتيجته." 
@@ -101,6 +105,10 @@ jobs:
             sudo apt-get update -y -qq && sudo apt-get install -y -qq ffmpeg libraqm0 fonts-dejavu-core
           fi
           python -m pip install -q --disable-pip-version-check --prefer-binary "yt-dlp[default,curl-cffi]" requests six fonttools arabic-reshaper "python-bidi==0.4.2" pillow numpy
+          # OpenCV (لتتبّع الوجوه) بيتثبّت بس لو الخاصية متعلّم عليها
+          if grep -q '"feat"' settings.json && grep -Eq '"feat": *"[^"]*face' settings.json; then
+            python -m pip install -q --disable-pip-version-check --prefer-binary opencv-python-headless || echo "::warning::OpenCV ماتثبّتش — تتبّع الوجوه هيتعطّل"
+          fi
 
       - name: صنع الريلز
         id: run
@@ -139,7 +147,9 @@ jobs:
           JOB: ${{ inputs.job }}
         run: |
           if [[ "$JOB" =~ ^[a-z0-9]{6,32}$ ]]; then tag="reels-$JOB"; else tag="reels-${{ github.run_id }}"; fi
-          gh release create "$tag" "$DIR"/reels.zip "$DIR"/reel_*.mp4 \
+          files=("$DIR"/reels.zip "$DIR"/reel_*.mp4)
+          [ -f "$DIR/music.m4a" ] && files+=("$DIR/music.m4a")
+          gh release create "$tag" "${files[@]}" \
             --title "🎬 ريلز $(date -u +%Y-%m-%d_%H:%M)" \
             --notes "نزّل **reels.zip** (كل الريلز في ملف واحد) أو كل ريل لوحده."
           # بصمة الطلب → الإصدار اللي فيه نتيجته (للتعرف على التكرار)

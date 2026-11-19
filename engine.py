@@ -1300,18 +1300,8 @@ def no_overlap(ws, dur):
     return out
 
 
-def smart_windows(src, dur, n, L, min_l, max_l):
-    if np is None:
-        return None
-    hop = 0.25
-    e = audio_energy(src, hop)
-    if e is None or len(e) < 16:
-        return None
-    db = 20 * np.log10(e + 1e-5)
-    floor, ceil = float(np.percentile(db, 10)), float(np.percentile(db, 95))
-    if ceil - floor < 3:
-        return None
-    s = np.clip((db - floor) / (ceil - floor), 0, 1)
+def _pick_windows(s, db, hop, dur, n, L, min_l, max_l):
+    """بيختار n مقطع مش متداخلين بأعلى مجموع درجات (برمجة ديناميكية) وبيظبط البداية/النهاية عند أهدأ نقطة."""
     N, Lf = len(s), int(round(L / hop))
     if Lf < 1 or Lf * n > N:
         return None
@@ -1338,12 +1328,13 @@ def smart_windows(src, dur, n, L, min_l, max_l):
         sel.append(st)
         i = st
     sel.reverse()
+    low = db if db is not None else s   # أهدأ نقطة: صوت هادي لو في صوت، وإلا أقل نشاط
 
     def quiet(t0_, t1_):
-        a, b = int(max(0, t0_) / hop), int(min(t1_, N * hop - hop) / hop)
-        if b < a:
+        a_, b_ = int(max(0, t0_) / hop), int(min(t1_, N * hop - hop) / hop)
+        if b_ < a_:
             return None
-        f = a + int(np.argmin(db[a:b + 1]))
+        f = a_ + int(np.argmin(low[a_:b_ + 1]))
         return (f + 0.5) * hop
 
     out, prev_end = [], 0.0
@@ -1360,6 +1351,314 @@ def smart_windows(src, dur, n, L, min_l, max_l):
         out.append((round(s2, 2), round(e2 - s2, 2)))
         prev_end = s2 + (e2 - s2)
     return out
+
+
+def smart_windows(src, dur, n, L, min_l, max_l):
+    """الاختيار القديم (طاقة الصوت بس) — بنستخدمه كاحتياطي."""
+    if np is None:
+        return None
+    hop = 0.25
+    e = audio_energy(src, hop)
+    if e is None or len(e) < 16:
+        return None
+    db = 20 * np.log10(e + 1e-5)
+    floor, ceil = float(np.percentile(db, 10)), float(np.percentile(db, 95))
+    if ceil - floor < 3:
+        return None
+    s = np.clip((db - floor) / (ceil - floor), 0, 1)
+    return _pick_windows(s, db, hop, dur, n, L, min_l, max_l)
+
+
+# ════════════════════════════════════════════════════════════
+#  تحليل الصورة: حركة + وضوح + وجوه (OpenCV اختياري)
+# ════════════════════════════════════════════════════════════
+def _cv2():
+    try:
+        import cv2
+        return cv2
+    except Exception:
+        return None
+
+
+def face_cascade_path():
+    cv2 = _cv2()
+    if cv2 is None:
+        return None
+    names = ("haarcascade_frontalface_default.xml", "haarcascade_frontalface_alt2.xml")
+    dirs = []
+    try:
+        dirs.append(cv2.data.haarcascades)
+    except Exception:
+        pass
+    dirs += ["/usr/share/opencv4/haarcascades", "/usr/share/opencv/haarcascades",
+             "/usr/local/share/opencv4/haarcascades"]
+    for d in dirs:
+        for nm in names:
+            pth = os.path.join(d, nm)
+            if os.path.isfile(pth):
+                return pth
+    return None
+
+
+def make_face_detector():
+    """بيرجّع دالة detect(gray) -> [(x, y, w, h)] أو None لو الكاشف مش متاح."""
+    cv2 = _cv2()
+    pth = face_cascade_path()
+    if cv2 is None or pth is None:
+        return None
+    try:
+        cc = cv2.CascadeClassifier(pth)
+        if cc.empty():
+            return None
+    except Exception:
+        return None
+
+    def detect(gray):
+        h, w = gray.shape[:2]
+        ms = max(18, int(w * 0.045))
+        try:
+            r = cc.detectMultiScale(cv2.equalizeHist(gray), scaleFactor=1.12, minNeighbors=5, minSize=(ms, ms))
+        except Exception:
+            return []
+        return [(int(x), int(y), int(a), int(b)) for (x, y, a, b) in r]
+
+    return detect
+
+
+def faces_available():
+    return np is not None and make_face_detector() is not None
+
+
+def _ffmpeg_vsync_args():
+    """-vsync اتشال في نسخ ffmpeg الجديدة وبقى -fps_mode: بنختار حسب النسخة."""
+    try:
+        r = run(["ffmpeg", "-version"], timeout=10)
+        m = re.search(r"version\D*n?(\d+)\.(\d+)", r.stdout or "")
+        if m and (int(m.group(1)), int(m.group(2))) >= (5, 1):
+            return ["-fps_mode", "passthrough"]
+    except Exception:
+        pass
+    return ["-vsync", "0"]
+
+
+def gray_frames(src, ss, length, fps, sw, sh, keyframes=False, max_seconds=None):
+    """مولّد بيطلّع فريمات رمادية (sh × sw) من ffmpeg. keyframes=True: المفاتيح بس (أسرع بكتير للفيديو الطويل)."""
+    cmd = ["ffmpeg", "-v", "error", "-nostdin"]
+    if keyframes:
+        cmd += ["-skip_frame", "nokey"]
+    if ss:
+        cmd += ["-ss", f"{ss:.3f}"]
+    if length:
+        cmd += ["-t", f"{length:.3f}"]
+    vf = f"scale={sw}:{sh}:flags=fast_bilinear,format=gray"
+    if not keyframes:
+        vf = f"fps={fps}," + vf
+    cmd += ["-i", src, "-an", "-sn", "-vf", vf] + _ffmpeg_vsync_args() + ["-f", "rawvideo", "-"]
+    try:
+        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    except OSError:
+        return
+    with _PLOCK:
+        _PROCS.add(p)
+    size, t0 = sw * sh, time.time()
+    try:
+        while True:
+            _chk()
+            b = p.stdout.read(size)
+            if not b or len(b) < size:
+                break
+            yield np.frombuffer(b, dtype=np.uint8).reshape(sh, sw)
+            if max_seconds and time.time() - t0 > max_seconds:
+                raise TimeoutError("analysis timeout")
+    finally:
+        try:
+            p.kill()
+        except Exception:
+            pass
+        try:
+            p.stdout.close()
+        except Exception:
+            pass
+        p.wait()
+        with _PLOCK:
+            _PROCS.discard(p)
+
+
+def keyframe_times(src):
+    r = run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "packet=pts_time,flags",
+             "-of", "csv=p=0", src], timeout=180)
+    ts = []
+    for ln in (r.stdout or "").splitlines():
+        parts = ln.strip().split(",")
+        if len(parts) >= 2 and "K" in parts[1]:
+            try:
+                ts.append(float(parts[0]))
+            except ValueError:
+                pass
+    ts.sort()
+    return ts
+
+
+def _norm01(x):
+    x = np.asarray(x, dtype=np.float64)
+    if x.size == 0:
+        return x
+    lo, hi = float(np.percentile(x, 10)), float(np.percentile(x, 95))
+    if hi - lo < 1e-9:
+        return np.full(x.shape, 0.5)
+    return np.clip((x - lo) / (hi - lo), 0, 1)
+
+
+def visual_scan(src, dur, info, want_faces, max_seconds=120):
+    """بيرجّع dict(t, motion, sharp, vis, face) أو None. فيديو طويل: بنقرا فريمات المفاتيح بس."""
+    if np is None:
+        return None
+    w, h = info.get("w") or 0, info.get("h") or 0
+    if not w or not h or not info.get("has_video"):
+        return None
+    sw = 320
+    sh = max(2, int(round(h * sw / w / 2)) * 2)
+    keyf = dur > 480
+    times = None
+    if keyf:
+        times = keyframe_times(src)
+        if len(times) < 8 or dur / max(1, len(times)) > 25:
+            return None
+    det = make_face_detector() if want_faces else None
+    T, MO, SH, VI, FC = [], [], [], [], []
+    prev, last_face, t0 = None, 0.0, time.time()
+    try:
+        for i, g in enumerate(gray_frames(src, 0, 0, 2, sw, sh, keyframes=keyf, max_seconds=max_seconds)):
+            gi = g.astype(np.int16)
+            if keyf:
+                if i >= len(times):
+                    break
+                t = times[i]
+            else:
+                t = i / 2.0
+            mean, std = float(g.mean()), float(g.std())
+            MO.append(float(np.abs(gi - prev).mean()) / 255.0 if prev is not None else 0.0)
+            SH.append(float(np.abs(np.diff(gi, axis=1)).mean() + np.abs(np.diff(gi, axis=0)).mean()))
+            VI.append(min(1.0, max(0.0, (mean - 18) / 40)) * min(1.0, max(0.0, (std - 6) / 14)))
+            if det is not None and (keyf or i % 2 == 0):
+                last_face = 1.0 if det(g) else 0.0
+            FC.append(last_face)
+            T.append(t)
+            prev = gi
+    except TimeoutError:
+        return None
+    if len(T) < 8:
+        return None
+    if keyf and len(MO) > 1:
+        MO[0] = MO[1]
+    return {"t": np.array(T), "motion": np.array(MO), "sharp": np.array(SH), "vis": np.array(VI),
+            "face": np.array(FC) if det is not None else None}
+
+
+def best_windows(src, dur, n, L, min_l, max_l, info, use_faces=False):
+    """بيختار أحسن اللحظات: حركة + وضوح الصورة + وجود وجوه + نشاط الصوت (من غير ما يفضّل الأغاني لوحدها)."""
+    if np is None:
+        return None
+    hop = 0.25
+    N = int(dur / hop)
+    if N < 16:
+        return None
+    grid = (np.arange(N) + 0.5) * hop
+    parts, db = [], None
+    if info.get("has_audio"):
+        e = audio_energy(src, hop)
+        if e is not None and len(e) >= 16:
+            db_raw = 20 * np.log10(e + 1e-5)
+            fl, ce = float(np.percentile(db_raw, 10)), float(np.percentile(db_raw, 95))
+            if ce - fl >= 3:
+                a = np.clip((db_raw - fl) / (ce - fl), 0, 1)
+                at = (np.arange(len(a)) + 0.5) * hop
+                parts.append((0.30, np.interp(grid, at, a)))
+                db = np.interp(grid, at, db_raw)
+    vs = visual_scan(src, dur, info, use_faces)
+    if vs is not None:
+        v = (0.6 * _norm01(vs["motion"]) + 0.4 * _norm01(vs["sharp"])) * vs["vis"]
+        parts.append((0.45, np.interp(grid, vs["t"], v)))
+        if vs["face"] is not None:
+            parts.append((0.25, np.interp(grid, vs["t"], vs["face"])))
+    if not parts:
+        return None
+    wsum = sum(wt for wt, _ in parts)
+    s = np.clip(sum(wt * x for wt, x in parts) / wsum, 0, 1)
+    return _pick_windows(s, db, hop, dur, n, L, min_l, max_l)
+
+
+# ════════════════════════════════════════════════════════════
+#  القص بالطول + تتبّع الوجوه
+# ════════════════════════════════════════════════════════════
+def face_track(src, st, ln, info, W, H):
+    """بيرجّع [(t, fx)] أو None. fx = مركز الوجه كنسبة من عرض الصورة بعد التكبير (0..1)."""
+    if np is None:
+        return None
+    det = make_face_detector()
+    w, h = info.get("w") or 0, info.get("h") or 0
+    if det is None or not w or not h:
+        return None
+    cw = min(1.0, (W / H) / (w / h))     # نسبة العرض اللي هتفضل ظاهرة بعد القص
+    if cw >= 0.98:
+        return None                       # مفيش قص أفقي أصلًا
+    sw = 480
+    sh = max(2, int(round(h * sw / w / 2)) * 2)
+    fps = 3.0
+    xs = []
+    try:
+        for g in gray_frames(src, st, ln, fps, sw, sh, max_seconds=90):
+            fs = det(g)
+            if not fs:
+                xs.append(np.nan)
+                continue
+            lo = min(x for x, y, a, b in fs) / sw
+            hi = max(x + a for x, y, a, b in fs) / sw
+            if hi - lo <= cw * 0.9:
+                xs.append((lo + hi) / 2)
+            else:
+                x, y, a, b = max(fs, key=lambda f: f[2] * f[3])
+                xs.append((x + a / 2) / sw)
+    except TimeoutError:
+        return None
+    arr = np.array(xs, dtype=np.float64)
+    ok = ~np.isnan(arr)
+    if arr.size < 2 or ok.sum() < max(2, int(0.15 * arr.size)):
+        return None
+    idx = np.arange(arr.size)
+    arr = np.interp(idx, idx[ok], arr[ok])
+    k = 5
+    pad = np.pad(arr, (k // 2, k // 2), mode="edge")
+    arr = np.median(np.lib.stride_tricks.sliding_window_view(pad, k), axis=1)
+    al, f_, b_ = 0.3, arr.copy(), arr.copy()
+    for i in range(1, arr.size):
+        f_[i] = al * arr[i] + (1 - al) * f_[i - 1]
+    for i in range(arr.size - 2, -1, -1):
+        b_[i] = al * arr[i] + (1 - al) * b_[i + 1]
+    arr = np.clip((f_ + b_) / 2, cw / 2, 1 - cw / 2)
+    step = max(1, int(math.ceil(arr.size / 48)))
+    sel = list(range(0, arr.size, step))
+    if sel[-1] != arr.size - 1:
+        sel.append(arr.size - 1)
+    return [(round(i / fps, 2), round(float(arr[i]), 4)) for i in sel]
+
+
+def crop_x_expr(track):
+    """تعبير ffmpeg لموضع القص الأفقي (استيفاء خطي بين نقط التتبّع). من غير if متداخلة."""
+    pts = [(float(t), float(f)) for t, f in track]
+    if not pts:
+        return None
+    if len(pts) == 1:
+        fexpr = f"{pts[0][1]:.4f}"
+    else:
+        terms = [f"lt(t,{pts[0][0]:.2f})*{pts[0][1]:.4f}"]
+        for (ta, fa), (tb, fb) in zip(pts, pts[1:]):
+            if tb - ta < 0.01:
+                continue
+            terms.append(f"gte(t,{ta:.2f})*lt(t,{tb:.2f})*({fa:.4f}+({fb - fa:.4f})*(t-{ta:.2f})/{tb - ta:.2f})")
+        terms.append(f"gte(t,{pts[-1][0]:.2f})*{pts[-1][1]:.4f}")
+        fexpr = "+".join(terms)
+    return f"clip(({fexpr})*iw-ow/2,0,iw-ow)"
 
 
 # ════════════════════════════════════════════════════════════
@@ -1387,7 +1686,7 @@ def convert_music(src, dst):
 # ════════════════════════════════════════════════════════════
 #  بناء أمر ffmpeg لكل ريل
 # ════════════════════════════════════════════════════════════
-def build_cmd(src, start, length, out, P, text_png, music, use_text, use_music):
+def build_cmd(src, start, length, out, P, text_png, music, use_text, use_music, track=None):
     W, H, spd = P["W"], P["H"], P["spd"]
     out_len = length / spd
     inputs = ["-ss", f"{start:.3f}", "-t", f"{length:.3f}", "-i", src]
@@ -1411,15 +1710,21 @@ def build_cmd(src, start, length, out, P, text_png, music, use_text, use_music):
               f"[b]scale={W}:{H}:force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1[fg];"
               f"[bg][fg]overlay=(W-w)/2:(H-h)/2,format=yuv420p,setsar=1{enh}{tail}[v0]")
     else:
+        xe = crop_x_expr(track) if track else None
+        crop = f"crop={W}:{H}:x='{xe}':y='(ih-oh)/2'" if xe else f"crop={W}:{H}"
         vf = (f"[0:v]fps=30,scale={W}:{H}:force_original_aspect_ratio=increase:force_divisible_by=2,"
-              f"crop={W}:{H},setsar=1,format=yuv420p{enh}{tail}[v0]")
-    vf += f";[v0][{t_idx}:v]overlay=0:0:shortest=1[v]" if t_idx is not None else ";[v0]null[v]"
+              f"{crop},setsar=1,format=yuv420p{enh}{tail}[v0]")
+    fadef = (f",fade=t=in:st=0:d=0.25,fade=t=out:st={max(0.0, out_len - 0.35):.3f}:d=0.35"
+             if P.get("fade") else "")
+    vf += (f";[v0][{t_idx}:v]overlay=0:0:shortest=1{fadef}[v]" if t_idx is not None
+           else f";[v0]null{fadef}[v]")
 
     fo = max(0.0, out_len - 0.5)
     fade = f"afade=t=in:d=0.12,afade=t=out:st={fo:.3f}:d=0.5"
     base_a = "aresample=44100,aformat=channel_layouts=stereo"
     at = ",".join(x for x in [f"atempo={spd}" if spd != 1 else "", "areverse" if P["reverse"] else ""] if x)
-    a0 = f"[0:a]{base_a}" + (f",{at}" if at else "")
+    dn = ",highpass=f=70,afftdn=nr=10:nf=-32" if P.get("denoise") else ""
+    a0 = f"[0:a]{base_a}{dn}" + (f",{at}" if at else "")
     use_orig = P["use_orig"]
     if use_orig and m_idx is not None:
         fa = (f"{a0}[a0];[{m_idx}:a]{base_a},volume={P['mvol']}[m];"
@@ -1492,6 +1797,21 @@ def normalize_settings(raw, need_rights=True):
         "mvol": to_int(g("mvol", 8), 8, 1, 30),
         "rights": bool(g("rights", False)),
     }
+    # الخصائص (مربعات التطبيق): feat = "crop,best,face,..." أو "none". لو مش موجودة = السلوك القديم بالظبط.
+    fr = g("feat", None)
+    FT = None
+    if fr is not None:
+        FT = {t.strip().lower() for t in re.split(r"[,\s|;]+", str(fr)) if t.strip()} - {"none"}
+    S["feat"] = FT
+    S["crop"] = bool(FT is not None and "crop" in FT)
+    S["face"] = bool(FT is not None and "face" in FT)
+    S["denoise"] = bool(FT is not None and "denoise" in FT)
+    S["fade"] = bool(FT is not None and "fade" in FT)
+    S["music_file"] = bool(FT is not None and "musicfile" in FT)
+    if FT is not None:
+        S["enhance"] = "enhance" in FT
+        S["use_orig"] = "orig" in FT
+        S["pick"] = "ذكي (أحسن اللحظات)" if "best" in FT else "توزيع متساوي"
     if S["ratio"] not in ("9:16", "4:5", "1:1"):
         S["ratio"] = "9:16"
     if not (0.5 <= S["spd"] <= 2.0):
@@ -1581,7 +1901,10 @@ def _main(raw):
     ratio = S["ratio"]
     W, H = dims_for(ratio, S["res"])
     fill = S["fill"]
-    if fill.startswith("قص"):
+    if S["crop"]:
+        fill = "crop"
+        say("القص بالطول: الفيديو بيتقص ويملا الشاشة كلها (من غير خلفية مغبشة).")
+    elif fill.startswith("قص"):
         fill = "crop"
     elif fill.startswith("خلفية"):
         fill = "blur"
@@ -1603,17 +1926,28 @@ def _main(raw):
         if n < n_req:
             say(f"الفيديو مش بيكفي {n_req} مقاطع بالمدة دي، هعمل {n} مقاطع بدل كده.", "warn")
 
+    if S["face"] and not faces_available():
+        say("تتبّع الوجوه مش متاح على السيرفر (OpenCV ناقص) — هكمّل بقص من المنتصف.", "warn")
+        S["face"] = False
     windows = None
-    if n >= 1 and dur >= min_l and S["pick"].startswith("ذكي") and info["has_audio"]:
-        prog.update("بحلّل الصوت عشان أختار أحسن اللحظات...", force=True)
+    if n >= 1 and dur >= min_l and S["pick"].startswith("ذكي") and (info["has_audio"] or info["has_video"]):
+        prog.update("بحلّل الفيديو (حركة + وجوه + صوت) عشان أختار أحسن اللحظات...", force=True)
         try:
-            windows = smart_windows(src, dur, n, L, min_l, max_l)
+            windows = best_windows(src, dur, n, L, min_l, max_l, info, S["face"])
         except Cancelled:
             raise
-        except Exception:
+        except Exception as e:
+            say(f"تحليل الفيديو وقف ({e.__class__.__name__}) — هستخدم تحليل الصوت بس.", "warn")
             windows = None
+        if not windows and info["has_audio"]:
+            try:
+                windows = smart_windows(src, dur, n, L, min_l, max_l)
+            except Cancelled:
+                raise
+            except Exception:
+                windows = None
         if windows:
-            say("تم اختيار أنشط اللحظات (كلام/صوت عالي) بدل التوزيع المتساوي، عشان المشاهد ما يزهقش.", "ok")
+            say("تم اختيار أحسن اللحظات (حركة + وضوح + " + ("وجوه + " if S["face"] else "") + "صوت) بدل التوزيع المتساوي.", "ok")
     if not windows:
         windows = uniform_windows(dur, n, L) if dur >= min_l else [(0.0, dur)]
         say("تم توزيع المقاطع بالتساوي على طول الفيديو.")
@@ -1643,7 +1977,7 @@ def _main(raw):
 
     # ---------- 4) الموسيقى ----------
     music = None
-    if S["music_on"]:
+    if S["music_on"] or S["music_file"]:
         prog.update("بجهّز الموسيقى...", force=True)
         music = WORK + "/music.wav"
         try:
@@ -1665,8 +1999,10 @@ def _main(raw):
             say(f"الموسيقى: {e} — هكمّل بدون موسيقى.", "warn")
             music = None
 
+    mix = music if S["music_on"] else None      # الموسيقى اللي بتتدمج جوه الفيديو (لو الزر مفعّل)
     P = {"W": W, "H": H, "spd": spd, "fill": fill, "enhance": S["enhance"], "reverse": reverse,
-         "use_orig": bool(S["use_orig"] and info["has_audio"]), "mvol": S["mvol"] / 100}
+         "use_orig": bool(S["use_orig"] and info["has_audio"]), "mvol": S["mvol"] / 100,
+         "denoise": S["denoise"] and info["has_audio"], "fade": S["fade"]}
     if S["use_orig"] and not info["has_audio"]:
         say("الفيديو الأصلي مفيهوش صوت.", "warn")
 
@@ -1686,12 +2022,22 @@ def _main(raw):
         attempts = [(True, True), (True, False), (False, True), (False, False)]
         if not text_png:
             attempts = [(False, True), (False, False)]
-        if not music:
+        if not mix:
             attempts = [a for a in attempts if not a[1]] or [(False, False)]
             attempts = list(dict.fromkeys(attempts))
         done_ok, last_err, out_len, lost = False, "", ln / spd, []
+        track = None
+        if S["face"] and P["fill"] == "crop":
+            try:
+                track = face_track(src, st, ln, info, W, H)
+            except Exception:
+                track = None
+            wide = (info.get("w") or 1) / (info.get("h") or 1) > (W / H) * 1.02
+            if track or wide:
+                say(f"ريل {i+1}: " + ("القص بيتابع الوش 👤" if track else "مفيش وش واضح — قص من المنتصف"),
+                    "ok" if track else "info")
         for (ut, um) in attempts:
-            cmd, out_len = build_cmd(src, st, ln, out, P, text_png, music, ut, um)
+            cmd, out_len = build_cmd(src, st, ln, out, P, text_png, mix, ut, um, track)
 
             def on_frac(f):
                 with flock:
@@ -1705,8 +2051,8 @@ def _main(raw):
             rc, err = render_clip(cmd, out_len, on_frac)
             if rc == 0 and os.path.exists(out) and os.path.getsize(out) > 10000:
                 done_ok = True
-                if (text_png and not ut) or (music and not um):
-                    lost = [x for x, f in (("النص", text_png and not ut), ("الموسيقى", music and not um)) if f]
+                if (text_png and not ut) or (mix and not um):
+                    lost = [x for x, f in (("النص", text_png and not ut), ("الموسيقى", mix and not um)) if f]
                 break
             last_err = err[-350:]
         return out, out_len, done_ok, lost, last_err
@@ -1735,6 +2081,10 @@ def _main(raw):
         except Exception:
             pass
 
+    longest = max(ol for _, ol in clips)
+    if longest > 180:
+        say(f"تنبيه: أطول ريل {fmt_t(longest)} — يوتيوب شورتس وريلز إنستجرام/فيسبوك بيقبلوا لحد 3 دقايق تقريبًا.", "warn")
+
     # ---------- 6) التسليم ----------
     prog.stage(97, 100)
     prog.update("بحفظ الملفات...", force=True, frac=0)
@@ -1746,10 +2096,20 @@ def _main(raw):
         dst = os.path.join(odir, os.path.basename(p))
         shutil.copy(p, dst)
         final.append((dst, ol))
+    extra_files = []
+    if S["music_file"] and music and os.path.exists(music):
+        mf = os.path.join(odir, "music.m4a")
+        r = run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", music, "-t", "180",
+                 "-c:a", "aac", "-b:a", "192k", mf])
+        if r.returncode == 0 and os.path.exists(mf):
+            extra_files.append(mf)
+            say("الموسيقى اتحفظت كملف منفصل: music.m4a (جوه reels.zip).", "ok")
     try:
         with zipfile.ZipFile(os.path.join(odir, "reels.zip"), "w", zipfile.ZIP_STORED) as z:
             for dst, _ in final:
                 z.write(dst, os.path.basename(dst))
+            for ef in extra_files:
+                z.write(ef, os.path.basename(ef))
     except Exception:
         pass
 
@@ -1870,6 +2230,7 @@ def selftest():
         row("requests", True)
     except Exception:
         row("requests", False)
+    row("OpenCV (تتبّع الوجوه)", faces_available(), "اختياري")
     row("node (يوتيوب)", bool(shutil.which("node")), "اختياري")
     try:
         p, mode, _, miss = pick_font("اختبار الخط العربي", "Tajawal")

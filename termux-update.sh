@@ -59,7 +59,7 @@ tar -C "$HERE" --exclude=./.git --exclude=./output --exclude=./work --exclude=./
   if git diff --cached --quiet; then
     echo "   (مفيش تغييرات جديدة للرفع — هكمّل للبناء)"
   else
-    git commit -q -m "reels maker v3: single-line text, background service, fast cloud, dedupe" || exit 1
+    git commit -q -m "reels maker v4: vertical crop, best moments, face tracking, feature tiles, no-scroll home" || exit 1
     if gh repo view "$REPO" >/dev/null 2>&1; then
       git remote get-url origin >/dev/null 2>&1 || git remote add origin "https://github.com/$REPO.git"
       git push -q origin HEAD:main || exit 1
