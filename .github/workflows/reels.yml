@@ -51,16 +51,6 @@ on:
       accs:
         description: "حسابات التك توك (مشفّرة، بيملاها التطبيق)"
         default: "[]"
-      facebook:
-        description: "نشر على صفحات فيسبوك بعد الانتهاء (من السيرفر)"
-        type: boolean
-        default: false
-      fb_pages:
-        description: "صفحات فيسبوك (مشفرة، بيملاها التطبيق)"
-        default: "[]"
-      fb_caption:
-        description: "وصف الفيديو على فيسبوك (اختياري)"
-        default: ""
       feat:
         description: "الخصائص (crop,best,face,enhance,orig,denoise,fade,musicfile أو none)"
         default: "crop,best,face,enhance,orig"
@@ -230,31 +220,6 @@ jobs:
           gh release create "tt-$JOB" --title "tt" --notes "$msg" || true
           gh release list --limit 100 --json tagName --jq '.[].tagName' | grep '^tt-' | tail -n +21 | \
             while read -r t; do gh release delete "$t" --cleanup-tag -y || true; done
-
-      # ───────── النشر على صفحات فيسبوك ─────────
-      - name: نشر على صفحات فيسبوك
-        if: inputs.facebook == true
-        continue-on-error: true
-        timeout-minutes: 30
-        env:
-          FB_PAGES: ${{ inputs.fb_pages }}
-          FB_PRIV: ${{ secrets.TT_PRIV }}
-          FB_CAPTION: ${{ inputs.fb_caption }}
-          FB_DIR: ${{ steps.reuse.outputs.hit == 'true' && steps.reuse.outputs.dir || steps.run.outputs.dir }}
-        run: |
-          python -m pip install -q --disable-pip-version-check cryptography requests
-          python cloud/facebook_post.py
-
-      - name: تقرير النشر على فيسبوك
-        if: always() && inputs.facebook == true
-        env:
-          GH_TOKEN: ${{ github.token }}
-          JOB: ${{ inputs.job }}
-        run: |
-          [[ "$JOB" =~ ^[a-z0-9]{6,32}$ ]] || exit 0
-          msg=$(cat fb_result.txt 2>/dev/null || echo "النشر على فيسبوك ماتمش")
-          gh release create "fb-$JOB" --title "fb" --notes "$msg" || true
-          gh release list --limit 100 --json tagName --jq '.[].tagName' | grep '^fb-' | tail -n +21 | while read -r t; do gh release delete "$t" --cleanup-tag -y || true; done
 
       - name: لقطات الفشل (للمستودع الخاص فقط)
         if: always() && inputs.tiktok == true && github.event.repository.private == true

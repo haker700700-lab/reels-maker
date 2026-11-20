@@ -21,7 +21,6 @@ public class VideoProvider extends ContentProvider {
         String n = u.getLastPathSegment();
         if (n == null || n.contains("/") || n.contains("..")) throw new FileNotFoundException();
         File f = new File(TikTokQ.dir(getContext()), n);
-        if (!f.isFile()) f = new File(FacebookQ.dir(getContext()), n);
         if (!f.isFile()) throw new FileNotFoundException();
         return f;
     }

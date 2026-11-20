@@ -269,15 +269,12 @@ public class JobService extends Service {
             }
             if (!"success".equals(conclusion)) throw new Gh.Fatal(failReason(job, conclusion));
 
-            String r0 = "";
-            if (sp.getBoolean("tt_server", false)) r0 += "تيك توك: " + ttResult(job) + "\n";
-            if (sp.getBoolean("fb_server", false)) r0 += "فيسبوك: " + fbResult(job) + "\n";
-            // لو النشر السحابي فشل وخيار النشر اليدوي مفعّل: ننزّل الفيديوهات للطابور كبديل.
-            boolean ttFailed = sp.getBoolean("tt_server", false) && (r0.contains("مفيش تقرير") || r0.contains("فشل"));
-            boolean fbFailed = sp.getBoolean("fb_server", false) && (r0.contains("فيسبوك:") && (r0.contains("❌") || r0.contains("لم يتم النشر") || r0.contains("مفيش تقرير")));
-            boolean needQueue = (sp.getBoolean("tt_on", false) && ttFailed) || (sp.getBoolean("fb_on", true) && fbFailed);
+            String r0 = sp.getBoolean("job_nodl", false) ? ttResult(job) : "";
+            // لو النشر من السيرفر فشل وخيار «جهّز للنشر اليدوي» مفعّل: نزّل الفيديوهات للطابور بدل ما نسيبك من غير حاجة
+            boolean serverFailed = r0.contains("فشل") || r0.contains("مفيش تقرير");
+            boolean needQueue = sp.getBoolean("tt_on", false) && serverFailed;
             if (sp.getBoolean("job_nodl", false) && !needQueue) {
-                String r = r0.isEmpty() ? "النشر السحابي اكتمل." : r0;
+                String r = r0;
                 sp.edit().putString("stage", "DONE").putString("msg", "✅ خلصنا (من غير تنزيل على الجهاز) — " + r).putInt("pct", 100).apply();
                 notifyDone(r);
                 return;
@@ -286,8 +283,7 @@ public class JobService extends Service {
             int q = sp.getInt("tt_queued", 0);
             String ttNote = q > 0 ? " — " + q + " فيديو جاهز للنشر على التك توك" : "";
             String where = name.isEmpty() ? "جوه التطبيق" : "الملف في «التنزيلات»: " + name;
-            String serverNote = r0.isEmpty() ? "" : "\n" + r0;
-            sp.edit().putString("stage", "DONE").putString("msg", "✅ خلصنا! " + where + ttNote + serverNote).putInt("pct", 100).apply();
+            sp.edit().putString("stage", "DONE").putString("msg", "✅ خلصنا! " + where + ttNote).putInt("pct", 100).apply();
             notifyDone("الريلز جاهزة" + ttNote);
         } catch (InterruptedException e) {
             // الخدمة اتوقفت: الحالة محفوظة وهنكمّل لما تشتغل تاني
@@ -301,18 +297,6 @@ public class JobService extends Service {
             releaseLocks();
             if (!stopping) finish();
         }
-    }
-
-    /** تقرير النشر على صفحات فيسبوك اللي السيرفر سجّله. */
-    String fbResult(String job) {
-        try {
-            String[] x = Gh.http("GET", Gh.API + "/repos/" + Gh.REPO + "/releases/tags/fb-" + job, null);
-            if ("200".equals(x[0])) {
-                String b = new JSONObject(x[1]).optString("body", "").trim();
-                if (!b.isEmpty()) return b.length() > 500 ? b.substring(0, 500) : b;
-            }
-        } catch (Exception ignored) { }
-        return "مفيش تقرير نشر من فيسبوك (راجع تبويب Actions)";
     }
 
     /** تقرير النشر على التك توك اللي السيرفر سجّله. */
@@ -367,9 +351,6 @@ public class JobService extends Service {
         int queued = 0;
         if (tt) {
             try { queued = TikTokQ.extract(this, part); } catch (Exception ignored) { }
-        }
-        if (sp.getBoolean("fb_on", true)) {
-            try { FacebookQ.extract(this, part); } catch (Exception ignored) { }
         }
         String where = (tt && !keep && queued > 0) ? "" : save(part, name);
         part.delete();

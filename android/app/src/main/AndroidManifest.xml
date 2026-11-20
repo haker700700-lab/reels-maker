@@ -27,15 +27,6 @@
         <activity android:name=".TikTokActivity" android:exported="false"
             android:screenOrientation="portrait" />
         <activity android:name=".TikLoginActivity" android:exported="false" />
-        <activity android:name=".FacebookActivity" android:exported="false" android:screenOrientation="portrait" />
-        <activity android:name=".FacebookLoginActivity" android:exported="true" android:launchMode="singleTask">
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="${fbAuthScheme}" android:host="authorize" />
-            </intent-filter>
-        </activity>
         <provider android:name=".VideoProvider" android:authorities="com.reelsmaker.app.videos"
             android:exported="false" android:grantUriPermissions="true" />
         <service android:name=".JobService" android:exported="false"
