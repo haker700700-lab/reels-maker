@@ -269,8 +269,12 @@ public class JobService extends Service {
             }
             if (!"success".equals(conclusion)) throw new Gh.Fatal(failReason(job, conclusion));
 
-            if (sp.getBoolean("job_nodl", false)) {
-                String r = ttResult(job);
+            String r0 = sp.getBoolean("job_nodl", false) ? ttResult(job) : "";
+            // لو النشر من السيرفر فشل وخيار «جهّز للنشر اليدوي» مفعّل: نزّل الفيديوهات للطابور بدل ما نسيبك من غير حاجة
+            boolean serverFailed = r0.contains("فشل") || r0.contains("مفيش تقرير");
+            boolean needQueue = sp.getBoolean("tt_on", false) && serverFailed;
+            if (sp.getBoolean("job_nodl", false) && !needQueue) {
+                String r = r0;
                 sp.edit().putString("stage", "DONE").putString("msg", "✅ خلصنا (من غير تنزيل على الجهاز) — " + r).putInt("pct", 100).apply();
                 notifyDone(r);
                 return;

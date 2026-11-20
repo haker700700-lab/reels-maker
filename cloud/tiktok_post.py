@@ -82,7 +82,7 @@ def check_block(page):
 
 
 
-POPUP_BTNS = ("Got it", "Not now", "Maybe later", "Skip", "Dismiss", "OK", "Cancel")
+POPUP_BTNS = ("Got it", "Not now", "Maybe later", "Skip", "Dismiss")
 EDITOR_SELS = ('div[contenteditable="true"]', 'div[contenteditable="plaintext-only"]',
                '.public-DraftEditor-content', '[data-e2e="caption-editor"] [contenteditable]')
 NOTES = []
@@ -140,6 +140,35 @@ def fill_caption(page, caption, tag):
     page.keyboard.press("Control+A")
     page.keyboard.press("Delete")
     page.keyboard.insert_text(caption)   # أسرع وأضمن مع العربي من type()
+
+
+def click_post(page, tag):
+    """يدوس زر النشر بأمان: يعيد البحث عنه (الصفحة بتتحدّث بعد كتابة الوصف)، يقفل النوافذ، ويجرّب بدائل."""
+    sel = 'button[data-e2e="post_video_button"]'
+    for _ in range(4):
+        dismiss_popups(page)
+        b = find(page, sel)
+        if b is None:
+            page.wait_for_timeout(1500)
+            continue
+        try:
+            b.scroll_into_view_if_needed(timeout=4000)
+            b.click(timeout=10000)
+            return
+        except Exception:
+            pass
+        try:
+            b.click(timeout=5000, force=True)
+            return
+        except Exception:
+            pass
+        try:
+            b.evaluate("e => e.click()")
+            return
+        except Exception:
+            page.wait_for_timeout(2000)
+    shot(page, f"{tag}_postbtn")
+    raise Blocked("زر النشر مابيستجيبش. " + diag(page))
 
 
 def find(page, selector):
@@ -231,8 +260,8 @@ def post_one(page, video, caption, tag):
         raise Blocked("الرفع ماخلصش في الوقت المناسب أو زر النشر مش ظاهر")
     if caption:
         fill_caption(page, caption, tag)
-    page.wait_for_timeout(1500)
-    btn.click()
+    page.wait_for_timeout(2000)
+    click_post(page, tag)
     page.wait_for_timeout(2500)
     for label in ("Post now", "Post", "Continue"):  # نافذة تأكيد لو ظهرت
         d = page.get_by_role("button", name=label, exact=True)
