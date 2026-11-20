@@ -81,6 +81,67 @@ def check_block(page):
         raise Blocked("التك توك طلب تحقق (كابتشا/كود). استخدم زر «تسجيل الدخول عبر صفحة التك توك» في التطبيق")
 
 
+
+POPUP_BTNS = ("Got it", "Not now", "Maybe later", "Skip", "Dismiss", "OK", "Cancel")
+EDITOR_SELS = ('div[contenteditable="true"]', 'div[contenteditable="plaintext-only"]',
+               '.public-DraftEditor-content', '[data-e2e="caption-editor"] [contenteditable]')
+NOTES = []
+
+
+def dismiss_popups(page):
+    """يقفل أي نافذة منبثقة (شرح/تنبيه) بتغطّي خانة الوصف. مابنوافقش على أي تفعيل."""
+    for fr in page.frames:
+        for label in POPUP_BTNS:
+            try:
+                b = fr.get_by_role("button", name=label, exact=True)
+                if b.count() > 0 and b.first.is_visible():
+                    b.first.click(timeout=2000)
+                    page.wait_for_timeout(500)
+            except Exception:
+                pass
+
+
+def visible_editor(page, wait_s=25):
+    """يدوّر على خانة الوصف الظاهرة فعلاً (مش أول عنصر مخفي) في الصفحة وكل الـ frames."""
+    for _ in range(wait_s):
+        dismiss_popups(page)
+        for fr in page.frames:
+            for sel in EDITOR_SELS:
+                loc = fr.locator(sel)
+                try:
+                    n = loc.count()
+                except Exception:
+                    continue
+                for i in range(n):
+                    el = loc.nth(i)
+                    try:
+                        if el.is_visible():
+                            return el
+                    except Exception:
+                        pass
+        page.wait_for_timeout(1000)
+    return None
+
+
+def fill_caption(page, caption, tag):
+    ed = visible_editor(page)
+    if ed is None:
+        shot(page, f"{tag}_caption")
+        NOTES.append(f"{tag}: خانة الوصف ماظهرتش، اتنشر من غير وصف. " + diag(page))
+        return
+    try:
+        ed.scroll_into_view_if_needed(timeout=5000)
+        ed.click(timeout=8000)
+    except Exception:
+        try:
+            ed.click(timeout=5000, force=True)
+        except Exception:
+            ed.evaluate("e => e.focus()")
+    page.keyboard.press("Control+A")
+    page.keyboard.press("Delete")
+    page.keyboard.insert_text(caption)   # أسرع وأضمن مع العربي من type()
+
+
 def find(page, selector):
     for fr in page.frames:
         loc = fr.locator(selector)
@@ -169,12 +230,7 @@ def post_one(page, video, caption, tag):
         shot(page, f"{tag}_upload")
         raise Blocked("الرفع ماخلصش في الوقت المناسب أو زر النشر مش ظاهر")
     if caption:
-        ed = find(page, 'div[contenteditable="true"]')
-        if ed:
-            ed.click()
-            page.keyboard.press("Control+A")
-            page.keyboard.press("Delete")
-            page.keyboard.type(caption, delay=15)
+        fill_caption(page, caption, tag)
     page.wait_for_timeout(1500)
     btn.click()
     page.wait_for_timeout(2500)
@@ -240,6 +296,7 @@ def main():
                 except Exception:
                     pass
         browser.close()
+    res["notes"].extend(NOTES)
     write(res, len(vids), len(accs))
 
 
