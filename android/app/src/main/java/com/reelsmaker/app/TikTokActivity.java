@@ -255,6 +255,7 @@ public class TikTokActivity extends Activity {
             pending = null;
         }
         refresh();
+        if (getIntent().getBooleanExtra("share_next_now", false)) { getIntent().removeExtra("share_next_now"); next.postDelayed(this::shareNext, 350); }
     }
 
     @Override protected void onPause() {

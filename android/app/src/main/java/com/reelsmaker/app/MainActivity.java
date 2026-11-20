@@ -239,17 +239,15 @@ public class MainActivity extends Activity {
         fl.topMargin = dp(4);
         root.addView(feats, fl);
 
+        Button fb = pill("📘 النشر على فيسبوك", false);
+        fb.setOnClickListener(v -> startActivity(new Intent(this, FacebookActivity.class)));
+        LinearLayout.LayoutParams fbl = lp(-1, dp(42), 0, 0); fbl.topMargin = dp(4); root.addView(fb, fbl);
+
         Button tt = pill("🎵 النشر على التك توك", false);
         tt.setOnClickListener(v -> startActivity(new Intent(this, TikTokActivity.class)));
         LinearLayout.LayoutParams tl = lp(-1, dp(42), 0, 0);
         tl.topMargin = dp(4);
         root.addView(tt, tl);
-
-        Button fb = pill("📘 النشر على فيسبوك", false);
-        fb.setOnClickListener(v -> startActivity(new Intent(this, FacebookActivity.class)));
-        LinearLayout.LayoutParams fbl = lp(-1, dp(42), 0, 0);
-        fbl.topMargin = dp(4);
-        root.addView(fb, fbl);
 
         go = new Button(this);
         go.setText("ابدأ الآن ☁️");
@@ -418,15 +416,18 @@ public class MainActivity extends Activity {
             in.put("music", String.valueOf(music.isChecked()));
             in.put("feat", Feat.string(sp));
             boolean ttOn = sp.getBoolean("tt_server", false);
-            boolean fbOn = sp.getBoolean("fb_on", false);
+            boolean fbOn = sp.getBoolean("fb_server", false);
             if (ttOn && sp.getString("tt_accs", "[]").length() < 5) {
                 status.setText("فعّلت النشر على التك توك بس مفيش حسابات. أضفها من «🎵 النشر على التك توك».");
                 return;
             }
             in.put("tiktok", String.valueOf(ttOn));
-            in.put("facebook", "false"); // لا يوجد نشر آلي قبل ربط Meta OAuth الرسمي
             in.put("accs", ttOn ? sp.getString("tt_accs", "[]") : "[]");
             in.put("caption", sp.getString("tt_caption", ""));
+            if (fbOn && sp.getString("fb_pages", "[]").length() < 5) { status.setText("فعّلت النشر على فيسبوك بس مفيش صفحات محفوظة. أضف الصفحات من «النشر على فيسبوك»."); return; }
+            in.put("facebook", String.valueOf(fbOn));
+            in.put("fb_pages", fbOn ? sp.getString("fb_pages", "[]") : "[]");
+            in.put("fb_caption", sp.getString("fb_caption", ""));
             body = new JSONObject().put("ref", "main").put("inputs", in).toString();
         } catch (Exception e) { status.setText("خطأ في الإعدادات."); return; }
 

@@ -269,25 +269,26 @@ public class JobService extends Service {
             }
             if (!"success".equals(conclusion)) throw new Gh.Fatal(failReason(job, conclusion));
 
-            String r0 = sp.getBoolean("job_nodl", false) ? ttResult(job) : "";
-            // لو النشر من السيرفر فشل وخيار «جهّز للنشر اليدوي» مفعّل: نزّل الفيديوهات للطابور بدل ما نسيبك من غير حاجة
-            boolean serverFailed = r0.contains("فشل") || r0.contains("مفيش تقرير");
-            boolean needQueue = sp.getBoolean("tt_on", false) && serverFailed;
-            boolean fbManual = sp.getBoolean("fb_on", false);
-            if (sp.getBoolean("job_nodl", false) && !needQueue && !fbManual) {
-                String r = r0;
+            String r0 = "";
+            if (sp.getBoolean("tt_server", false)) r0 += "تيك توك: " + ttResult(job) + "\n";
+            if (sp.getBoolean("fb_server", false)) r0 += "فيسبوك: " + fbResult(job) + "\n";
+            // لو النشر السحابي فشل وخيار النشر اليدوي مفعّل: ننزّل الفيديوهات للطابور كبديل.
+            boolean ttFailed = sp.getBoolean("tt_server", false) && (r0.contains("مفيش تقرير") || r0.contains("فشل"));
+            boolean fbFailed = sp.getBoolean("fb_server", false) && (r0.contains("فيسبوك:") && (r0.contains("❌") || r0.contains("لم يتم النشر") || r0.contains("مفيش تقرير")));
+            boolean needQueue = (sp.getBoolean("tt_on", false) && ttFailed) || (sp.getBoolean("fb_on", true) && fbFailed);
+            if (sp.getBoolean("job_nodl", false) && !needQueue) {
+                String r = r0.isEmpty() ? "النشر السحابي اكتمل." : r0;
                 sp.edit().putString("stage", "DONE").putString("msg", "✅ خلصنا (من غير تنزيل على الجهاز) — " + r).putInt("pct", 100).apply();
                 notifyDone(r);
                 return;
             }
             String name = download("reels-" + job);
             int q = sp.getInt("tt_queued", 0);
-            int fq = sp.getInt("fb_queued", 0);
             String ttNote = q > 0 ? " — " + q + " فيديو جاهز للنشر على التك توك" : "";
-            String fbNote = fq > 0 ? " — " + fq + " فيديو جاهز للنشر على فيسبوك" : "";
             String where = name.isEmpty() ? "جوه التطبيق" : "الملف في «التنزيلات»: " + name;
-            sp.edit().putString("stage", "DONE").putString("msg", "✅ خلصنا! " + where + ttNote + fbNote).putInt("pct", 100).apply();
-            notifyDone("الريلز جاهزة" + ttNote + fbNote);
+            String serverNote = r0.isEmpty() ? "" : "\n" + r0;
+            sp.edit().putString("stage", "DONE").putString("msg", "✅ خلصنا! " + where + ttNote + serverNote).putInt("pct", 100).apply();
+            notifyDone("الريلز جاهزة" + ttNote);
         } catch (InterruptedException e) {
             // الخدمة اتوقفت: الحالة محفوظة وهنكمّل لما تشتغل تاني
         } catch (Gh.Fatal e) {
@@ -300,6 +301,18 @@ public class JobService extends Service {
             releaseLocks();
             if (!stopping) finish();
         }
+    }
+
+    /** تقرير النشر على صفحات فيسبوك اللي السيرفر سجّله. */
+    String fbResult(String job) {
+        try {
+            String[] x = Gh.http("GET", Gh.API + "/repos/" + Gh.REPO + "/releases/tags/fb-" + job, null);
+            if ("200".equals(x[0])) {
+                String b = new JSONObject(x[1]).optString("body", "").trim();
+                if (!b.isEmpty()) return b.length() > 500 ? b.substring(0, 500) : b;
+            }
+        } catch (Exception ignored) { }
+        return "مفيش تقرير نشر من فيسبوك (راجع تبويب Actions)";
     }
 
     /** تقرير النشر على التك توك اللي السيرفر سجّله. */
@@ -350,18 +363,17 @@ public class JobService extends Service {
         }
         String name = "Reels_" + new SimpleDateFormat("yyyyMMdd_HHmm", Locale.US).format(new Date()) + ".zip";
         boolean tt = sp.getBoolean("tt_on", false);
-        boolean fb = sp.getBoolean("fb_on", false);
-        boolean keep = (!tt || sp.getBoolean("tt_keep", true)) || (!fb || sp.getBoolean("fb_keep", true));
-        int queued = 0, fbQueued = 0;
+        boolean keep = sp.getBoolean("tt_keep", true);
+        int queued = 0;
         if (tt) {
             try { queued = TikTokQ.extract(this, part); } catch (Exception ignored) { }
         }
-        if (fb) {
-            try { fbQueued = FacebookQ.extract(this, part); } catch (Exception ignored) { }
+        if (sp.getBoolean("fb_on", true)) {
+            try { FacebookQ.extract(this, part); } catch (Exception ignored) { }
         }
-        String where = ((tt || fb) && !keep && (queued + fbQueued) > 0) ? "" : save(part, name);
+        String where = (tt && !keep && queued > 0) ? "" : save(part, name);
         part.delete();
-        sp.edit().putInt("tt_queued", queued).putInt("fb_queued", fbQueued).apply();
+        sp.edit().putInt("tt_queued", queued).apply();
         return where;
     }
 

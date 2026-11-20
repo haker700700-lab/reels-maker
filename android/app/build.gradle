@@ -12,6 +12,8 @@ android {
         // بتتحقن وقت البناء على GitHub من الـ Secret (مش متكتوبة في الكود)
         buildConfigField "String", "APP_TOKEN", "\"${project.findProperty('appToken') ?: ''}\""
         buildConfigField "String", "TT_PUB", "\"${project.findProperty('ttPub') ?: ''}\""
+        buildConfigField "String", "FB_APP_ID", "\"${project.findProperty('fbAppId') ?: ''}\""
+        manifestPlaceholders = [fbAuthScheme: "fb${project.findProperty('fbAppId') ?: ''}"]
         buildConfigField "String", "APP_REPO", "\"${project.findProperty('appRepo') ?: ''}\""
     }
     buildFeatures { buildConfig true }

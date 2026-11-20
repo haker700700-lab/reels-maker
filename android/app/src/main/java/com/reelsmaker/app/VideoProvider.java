@@ -20,9 +20,8 @@ public class VideoProvider extends ContentProvider {
     private File fileOf(Uri u) throws FileNotFoundException {
         String n = u.getLastPathSegment();
         if (n == null || n.contains("/") || n.contains("..")) throw new FileNotFoundException();
-        boolean fb = n.startsWith("fb_");
-        if (fb) n = n.substring(3);
-        File f = new File(fb ? FacebookQ.dir(getContext()) : TikTokQ.dir(getContext()), n);
+        File f = new File(TikTokQ.dir(getContext()), n);
+        if (!f.isFile()) f = new File(FacebookQ.dir(getContext()), n);
         if (!f.isFile()) throw new FileNotFoundException();
         return f;
     }

@@ -26,6 +26,7 @@ jobs:
           ORG_GRADLE_PROJECT_appToken: ${{ secrets.APP_TOKEN }}
           ORG_GRADLE_PROJECT_appRepo: ${{ github.repository }}
           ORG_GRADLE_PROJECT_ttPub: ${{ vars.TT_PUB }}
+          ORG_GRADLE_PROJECT_fbAppId: ${{ vars.FB_APP_ID }}
         run: |
           [ -n "$ORG_GRADLE_PROJECT_appToken" ] || { echo "::error::الـ Secret اسمه APP_TOKEN مش متضاف"; exit 1; }
           gradle -p android assembleDebug --no-daemon
