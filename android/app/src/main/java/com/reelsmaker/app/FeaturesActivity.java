@@ -187,6 +187,12 @@ public class FeaturesActivity extends Activity {
         drp.topMargin = dp(4);
         root.addView(dr, drp);
 
+        Button social = pill("🔗 الحسابات والنشر التلقائي", ACC2 & 0x00FFFFFF | 0x55000000);
+        social.setOnClickListener(v -> startActivity(new android.content.Intent(this, SocialActivity.class)));
+        LinearLayout.LayoutParams sop = new LinearLayout.LayoutParams(-1, dp(42));
+        sop.topMargin = dp(4);
+        root.addView(social, sop);
+
         Button ok = pill("تمام ✓", ACC);
         ok.setTextSize(16);
         ok.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);

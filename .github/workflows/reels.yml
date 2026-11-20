@@ -44,9 +44,13 @@ on:
       feat:
         description: "الخصائص (crop,best,face,enhance,orig,denoise,fade,musicfile أو none)"
         default: "crop,best,face,enhance,orig"
+      post:
+        description: "النشر التلقائي على الحسابات المربوطة (1 = شغّال)"
+        default: ""
 
 permissions:
   contents: write
+  actions: write
 
 jobs:
   make:
@@ -167,5 +171,24 @@ jobs:
             echo "كل الريلز لوحدها: https://github.com/${{ github.repository }}/releases/tag/$tag"
           } >> "$GITHUB_STEP_SUMMARY"
           # امسح الإصدارات القديمة (احتفظ بآخر 60)
-          gh release list --limit 100 --json tagName --jq '.[].tagName' | grep '^reels-' | tail -n +61 | \
+          python3 -m pip install -q --user --break-system-packages cryptography >/dev/null 2>&1 || true
+          APP_TOKEN="${{ secrets.APP_TOKEN }}" GH_REPO="${{ github.repository }}" python3 cloud/publisher.py pinned > pinned.txt 2>/dev/null || true
+          gh release list --limit 100 --json tagName --jq '.[].tagName' | grep '^reels-' | tail -n +61 | grep -vxFf pinned.txt | \
             while read -r t; do gh release delete "$t" --cleanup-tag -y || true; done
+
+      # الريلز اتنشرت كإصدار reels-JOB؛ دلوقتي نحطها في جدول كل حساب (الناشر بيتولّى الباقي كل 5 دقايق)
+      - name: جدولة النشر على الحسابات (لو مفعّل)
+        if: inputs.post == '1' && inputs.job != ''
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          APP_TOKEN: ${{ secrets.APP_TOKEN }}
+          DIR: ${{ steps.reuse.outputs.hit == 'true' && steps.reuse.outputs.dir || steps.run.outputs.dir }}
+          JOB: ${{ inputs.job }}
+        run: |
+          [[ "$JOB" =~ ^[a-z0-9]{6,32}$ ]] || exit 0
+          python3 -m pip install -q --user --break-system-packages cryptography
+          python3 cloud/publisher.py enqueue "$JOB" "$DIR"
+          # شغّل الناشر فورًا لو في حاجة معادها جه دلوقتي
+          gh workflow run publisher.yml || true

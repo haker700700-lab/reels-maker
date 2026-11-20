@@ -269,9 +269,19 @@ public class JobService extends Service {
             }
             if (!"success".equals(conclusion)) throw new Gh.Fatal(failReason(job, conclusion));
 
-            String name = download("reels-" + job);
-            sp.edit().putString("stage", "DONE").putString("msg", "✅ خلصنا! الملف في «التنزيلات»: " + name).putInt("pct", 100).apply();
-            notifyDone("الريلز جاهزة في التنزيلات: " + name);
+            boolean posting = sp.getBoolean("auto_post", false);
+            if (sp.getBoolean("stop_dl", false)) {
+                // التنزيل متوقف من الإعدادات: الريلز جاهزة على السيرفر (وبتتجدول للنشر لو التلقائي شغّال)
+                String m = posting ? "✅ خلصنا! الريلز اتصنعت واتبعتت للنشر التلقائي — شوف «الجدولة» (من غير تنزيل على الموبايل)."
+                        : "✅ خلصنا! الريلز جاهزة على السيرفر (التنزيل متوقف من الإعدادات).";
+                sp.edit().putString("stage", "DONE").putString("msg", m).putInt("pct", 100).apply();
+                notifyDone(posting ? "الريلز اتجدولت للنشر" : "الريلز جاهزة على السيرفر");
+            } else {
+                String name = download("reels-" + job);
+                String m = "✅ خلصنا! الملف في «التنزيلات»: " + name + (posting ? "\n📤 والريلز اتبعتت للنشر التلقائي." : "");
+                sp.edit().putString("stage", "DONE").putString("msg", m).putInt("pct", 100).apply();
+                notifyDone("الريلز جاهزة في التنزيلات: " + name);
+            }
         } catch (InterruptedException e) {
             // الخدمة اتوقفت: الحالة محفوظة وهنكمّل لما تشتغل تاني
         } catch (Gh.Fatal e) {

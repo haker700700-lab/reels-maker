@@ -405,6 +405,7 @@ public class MainActivity extends Activity {
             in.put("text", text.getText().toString());
             in.put("music", String.valueOf(music.isChecked()));
             in.put("feat", Feat.string(sp));
+            in.put("post", sp.getBoolean("auto_post", false) ? "1" : "");
             body = new JSONObject().put("ref", "main").put("inputs", in).toString();
         } catch (Exception e) { status.setText("خطأ في الإعدادات."); return; }
 
