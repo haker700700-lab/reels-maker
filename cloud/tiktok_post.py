@@ -268,14 +268,46 @@ def post_one(page, video, caption, tag):
         if d.count() > 0 and d.first.is_visible():
             d.first.click()
             break
-    ok = re.compile(r"(video|post).*(uploaded|published|posted)|manage your posts|being uploaded", re.I)
+    # نجاح حقيقي = اتحوّلنا لصفحة المحتوى، أو ظهرت نافذة التأكيد بأزرارها (مش مجرد نص "uploaded" على صفحة الرفع)
+    confirmed = False
     for _ in range(40):
         page.wait_for_timeout(2500)
         check_block(page)
-        if "tiktokstudio/content" in page.url or page.get_by_text(ok).count() > 0:
-            return
-    shot(page, f"{tag}_post")
-    raise Blocked("ماقدرتش أتأكد إن النشر تم")
+        if "tiktokstudio/content" in page.url:
+            confirmed = True
+            break
+        done_btn = False
+        for label in ("Manage your posts", "Upload another video", "View profile"):
+            b = page.get_by_role("button", name=label)
+            l = page.get_by_role("link", name=label)
+            if (b.count() > 0 and b.first.is_visible()) or (l.count() > 0 and l.first.is_visible()):
+                done_btn = True
+        if done_btn:
+            confirmed = True
+            break
+    if not confirmed:
+        shot(page, f"{tag}_post")
+        raise Blocked("ماقدرتش أتأكد إن النشر تم. " + diag(page))
+    verify_posted(page, tag)
+
+
+def verify_posted(page, tag):
+    """يفتح صفحة المحتوى ويتأكد إن فيه فيديوهات فعلاً، ويسجّل حالة الصفحة في التقرير عشان نشوف اللي حصل."""
+    empty = re.compile(r"no (content|posts|videos)|haven.t (posted|uploaded)|nothing (here|yet)|no results", re.I)
+    txt = ""
+    for _ in range(3):
+        page.goto("https://www.tiktok.com/tiktokstudio/content", wait_until="domcontentloaded")
+        page.wait_for_timeout(8000)
+        try:
+            txt = page.inner_text("body", timeout=4000).replace("\n", " ")
+        except Exception:
+            txt = ""
+        if txt and not empty.search(txt):
+            break
+    shot(page, f"{tag}_content")
+    NOTES.append(f"{tag} حالة المحتوى: " + txt[:150])
+    if not txt or empty.search(txt):
+        raise Blocked("اتضغط نشر بس الفيديو مش ظاهر في صفحة المحتوى. " + diag(page))
 
 
 def main():
@@ -331,7 +363,7 @@ def main():
 
 def write(res, nv, na):
     line = f"نُشر {res['ok']} (فيديوهات {nv} × حسابات {na})"
-    if res["fail"] or res["notes"]:
+    if res["fail"]:
         line += f" — فشل {res['fail']}"
     body = line + ("\n" + "\n".join(res["notes"][:8]) if res["notes"] else "")
     Path("tt_result.txt").write_text(body, encoding="utf-8")
