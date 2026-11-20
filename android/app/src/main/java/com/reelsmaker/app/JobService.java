@@ -273,7 +273,8 @@ public class JobService extends Service {
             // لو النشر من السيرفر فشل وخيار «جهّز للنشر اليدوي» مفعّل: نزّل الفيديوهات للطابور بدل ما نسيبك من غير حاجة
             boolean serverFailed = r0.contains("فشل") || r0.contains("مفيش تقرير");
             boolean needQueue = sp.getBoolean("tt_on", false) && serverFailed;
-            if (sp.getBoolean("job_nodl", false) && !needQueue) {
+            boolean fbManual = sp.getBoolean("fb_on", false);
+            if (sp.getBoolean("job_nodl", false) && !needQueue && !fbManual) {
                 String r = r0;
                 sp.edit().putString("stage", "DONE").putString("msg", "✅ خلصنا (من غير تنزيل على الجهاز) — " + r).putInt("pct", 100).apply();
                 notifyDone(r);
@@ -281,10 +282,12 @@ public class JobService extends Service {
             }
             String name = download("reels-" + job);
             int q = sp.getInt("tt_queued", 0);
+            int fq = sp.getInt("fb_queued", 0);
             String ttNote = q > 0 ? " — " + q + " فيديو جاهز للنشر على التك توك" : "";
+            String fbNote = fq > 0 ? " — " + fq + " فيديو جاهز للنشر على فيسبوك" : "";
             String where = name.isEmpty() ? "جوه التطبيق" : "الملف في «التنزيلات»: " + name;
-            sp.edit().putString("stage", "DONE").putString("msg", "✅ خلصنا! " + where + ttNote).putInt("pct", 100).apply();
-            notifyDone("الريلز جاهزة" + ttNote);
+            sp.edit().putString("stage", "DONE").putString("msg", "✅ خلصنا! " + where + ttNote + fbNote).putInt("pct", 100).apply();
+            notifyDone("الريلز جاهزة" + ttNote + fbNote);
         } catch (InterruptedException e) {
             // الخدمة اتوقفت: الحالة محفوظة وهنكمّل لما تشتغل تاني
         } catch (Gh.Fatal e) {
@@ -347,14 +350,18 @@ public class JobService extends Service {
         }
         String name = "Reels_" + new SimpleDateFormat("yyyyMMdd_HHmm", Locale.US).format(new Date()) + ".zip";
         boolean tt = sp.getBoolean("tt_on", false);
-        boolean keep = sp.getBoolean("tt_keep", true);
-        int queued = 0;
+        boolean fb = sp.getBoolean("fb_on", false);
+        boolean keep = (!tt || sp.getBoolean("tt_keep", true)) || (!fb || sp.getBoolean("fb_keep", true));
+        int queued = 0, fbQueued = 0;
         if (tt) {
             try { queued = TikTokQ.extract(this, part); } catch (Exception ignored) { }
         }
-        String where = (tt && !keep && queued > 0) ? "" : save(part, name);
+        if (fb) {
+            try { fbQueued = FacebookQ.extract(this, part); } catch (Exception ignored) { }
+        }
+        String where = ((tt || fb) && !keep && (queued + fbQueued) > 0) ? "" : save(part, name);
         part.delete();
-        sp.edit().putInt("tt_queued", queued).apply();
+        sp.edit().putInt("tt_queued", queued).putInt("fb_queued", fbQueued).apply();
         return where;
     }
 
