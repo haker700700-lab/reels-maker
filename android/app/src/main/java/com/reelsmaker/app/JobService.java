@@ -147,7 +147,7 @@ public class JobService extends Service {
         try {
             if (nm == null) return;
             Notification.Builder b = Build.VERSION.SDK_INT >= 26 ? new Notification.Builder(this, CH_DONE) : new Notification.Builder(this);
-            Intent v = new Intent(DownloadManager.ACTION_VIEW_DOWNLOADS);
+            Intent v = sp.getInt("tt_queued", 0) > 0 ? new Intent(this, TikTokActivity.class) : new Intent(DownloadManager.ACTION_VIEW_DOWNLOADS);
             v.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             b.setSmallIcon(android.R.drawable.stat_sys_download_done)
                     .setContentTitle("🎬 صانع الريلز")
@@ -269,19 +269,18 @@ public class JobService extends Service {
             }
             if (!"success".equals(conclusion)) throw new Gh.Fatal(failReason(job, conclusion));
 
-            boolean posting = sp.getBoolean("auto_post", false);
-            if (sp.getBoolean("stop_dl", false)) {
-                // التنزيل متوقف من الإعدادات: الريلز جاهزة على السيرفر (وبتتجدول للنشر لو التلقائي شغّال)
-                String m = posting ? "✅ خلصنا! الريلز اتصنعت واتبعتت للنشر التلقائي — شوف «الجدولة» (من غير تنزيل على الموبايل)."
-                        : "✅ خلصنا! الريلز جاهزة على السيرفر (التنزيل متوقف من الإعدادات).";
-                sp.edit().putString("stage", "DONE").putString("msg", m).putInt("pct", 100).apply();
-                notifyDone(posting ? "الريلز اتجدولت للنشر" : "الريلز جاهزة على السيرفر");
-            } else {
-                String name = download("reels-" + job);
-                String m = "✅ خلصنا! الملف في «التنزيلات»: " + name + (posting ? "\n📤 والريلز اتبعتت للنشر التلقائي." : "");
-                sp.edit().putString("stage", "DONE").putString("msg", m).putInt("pct", 100).apply();
-                notifyDone("الريلز جاهزة في التنزيلات: " + name);
+            if (sp.getBoolean("job_nodl", false)) {
+                String r = ttResult(job);
+                sp.edit().putString("stage", "DONE").putString("msg", "✅ خلصنا (من غير تنزيل على الجهاز) — " + r).putInt("pct", 100).apply();
+                notifyDone(r);
+                return;
             }
+            String name = download("reels-" + job);
+            int q = sp.getInt("tt_queued", 0);
+            String ttNote = q > 0 ? " — " + q + " فيديو جاهز للنشر على التك توك" : "";
+            String where = name.isEmpty() ? "جوه التطبيق" : "الملف في «التنزيلات»: " + name;
+            sp.edit().putString("stage", "DONE").putString("msg", "✅ خلصنا! " + where + ttNote).putInt("pct", 100).apply();
+            notifyDone("الريلز جاهزة" + ttNote);
         } catch (InterruptedException e) {
             // الخدمة اتوقفت: الحالة محفوظة وهنكمّل لما تشتغل تاني
         } catch (Gh.Fatal e) {
@@ -294,6 +293,18 @@ public class JobService extends Service {
             releaseLocks();
             if (!stopping) finish();
         }
+    }
+
+    /** تقرير النشر على التك توك اللي السيرفر سجّله. */
+    String ttResult(String job) {
+        try {
+            String[] x = Gh.http("GET", Gh.API + "/repos/" + Gh.REPO + "/releases/tags/tt-" + job, null);
+            if ("200".equals(x[0])) {
+                String b = new JSONObject(x[1]).optString("body", "").trim();
+                if (!b.isEmpty()) return b.length() > 500 ? b.substring(0, 500) : b;
+            }
+        } catch (Exception ignored) { }
+        return "مفيش تقرير نشر من السيرفر (راجع تبويب Actions)";
     }
 
     /** بيجيب سبب الفشل الحقيقي اللي السيرفر سجّله. */
@@ -331,8 +342,15 @@ public class JobService extends Service {
             });
         }
         String name = "Reels_" + new SimpleDateFormat("yyyyMMdd_HHmm", Locale.US).format(new Date()) + ".zip";
-        String where = save(part, name);
+        boolean tt = sp.getBoolean("tt_on", false);
+        boolean keep = sp.getBoolean("tt_keep", true);
+        int queued = 0;
+        if (tt) {
+            try { queued = TikTokQ.extract(this, part); } catch (Exception ignored) { }
+        }
+        String where = (tt && !keep && queued > 0) ? "" : save(part, name);
         part.delete();
+        sp.edit().putInt("tt_queued", queued).apply();
         return where;
     }
 

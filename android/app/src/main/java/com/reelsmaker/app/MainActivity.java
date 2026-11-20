@@ -239,6 +239,12 @@ public class MainActivity extends Activity {
         fl.topMargin = dp(4);
         root.addView(feats, fl);
 
+        Button tt = pill("🎵 النشر على التك توك", false);
+        tt.setOnClickListener(v -> startActivity(new Intent(this, TikTokActivity.class)));
+        LinearLayout.LayoutParams tl = lp(-1, dp(42), 0, 0);
+        tl.topMargin = dp(4);
+        root.addView(tt, tl);
+
         go = new Button(this);
         go.setText("ابدأ الآن ☁️");
         go.setAllCaps(false);
@@ -405,12 +411,20 @@ public class MainActivity extends Activity {
             in.put("text", text.getText().toString());
             in.put("music", String.valueOf(music.isChecked()));
             in.put("feat", Feat.string(sp));
-            in.put("post", sp.getBoolean("auto_post", false) ? "1" : "");
+            boolean ttOn = sp.getBoolean("tt_server", false);
+            if (ttOn && sp.getString("tt_accs", "[]").length() < 5) {
+                status.setText("فعّلت النشر على التك توك بس مفيش حسابات. أضفها من «🎵 النشر على التك توك».");
+                return;
+            }
+            in.put("tiktok", String.valueOf(ttOn));
+            in.put("accs", ttOn ? sp.getString("tt_accs", "[]") : "[]");
+            in.put("caption", sp.getString("tt_caption", ""));
             body = new JSONObject().put("ref", "main").put("inputs", in).toString();
         } catch (Exception e) { status.setText("خطأ في الإعدادات."); return; }
 
         // كل حالة العملية بتتحفظ، فالخدمة تكمّل لو اتقتلت أو الجهاز اتعاد تشغيله
         sp.edit().putString("job", job).putString("body", body).putString("stage", "NEW")
+                .putBoolean("job_nodl", sp.getBoolean("tt_server", false) && sp.getBoolean("tt_nodl", false))
                 .putBoolean("posted", false).putLong("t0", System.currentTimeMillis())
                 .putString("msg", "ببعت الطلب للسيرفر...").putInt("pct", 0).apply();
         link.setText("");   // الرابط الجاي جديد؛ باقي الإعدادات زي ما هي

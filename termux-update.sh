@@ -5,8 +5,6 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 cd "$HERE" || exit 1
 export BROWSER=termux-open-url
 START=$(date +%s)
-termux-wake-lock >/dev/null 2>&1 || true
-trap 'termux-wake-unlock >/dev/null 2>&1' EXIT
 die() { echo; echo "❌ $*"; exit 1; }
 
 echo "🎬 تحديث صانع الريلز — حوالي 5 لـ 8 دقايق (أغلبها بناء التطبيق على السيرفر)"
@@ -28,17 +26,7 @@ fi
 
 # 2) الأدوات
 echo "2/6 تجهيز الأدوات..."
-# تحديث حزم Termux كلها الأول (بيصلّح خطأ CANNOT LINK / SSL_set_quic اللي بيحصل لما الحزم تتحدّث نص تحديث)
-export DEBIAN_FRONTEND=noninteractive
-APTO='-o Dpkg::Options::=--force-confnew -o Dpkg::Options::=--force-confold'
-if ! grep -qs '^deb ' "$PREFIX/etc/apt/sources.list"; then
-  echo "deb https://packages-cf.termux.dev/apt/termux-main stable main" > "$PREFIX/etc/apt/sources.list"
-fi
-apt-get update -y >/dev/null 2>&1 || apt-get update -y || true
-apt-get full-upgrade -y $APTO >/dev/null 2>&1 || apt-get full-upgrade -y $APTO || true
-apt-get install -y git gh curl openssl termux-tools >/dev/null 2>&1 || apt-get install -y git gh curl openssl || die "فشل تثبيت الأدوات. جرّب: termux-change-repo ثم شغّل الأمر تاني."
-
-git ls-remote https://github.com/cli/cli HEAD >/dev/null 2>&1 || die "git لسه مش شغّال. اكتب: pkg upgrade -y  ثم  termux-change-repo (اختار أي مرآة) وشغّل الأمر تاني."
+pkg install -y git gh curl termux-tools >/dev/null 2>&1 || pkg install -y git gh curl || die "فشل تثبيت الأدوات. جرّب: termux-change-repo ثم شغّل الأمر تاني."
 
 # 3) الدخول لـ GitHub
 if ! gh auth status >/dev/null 2>&1; then
@@ -56,7 +44,7 @@ echo "3/6 الحساب: $LOGIN — المستودع: $REPO"
 # 4) رفع النسخة المطوّرة (بيحافظ على تاريخ المستودع)
 echo "4/6 رفع التحديث..."
 TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"; termux-wake-unlock >/dev/null 2>&1' EXIT
+trap 'rm -rf "$TMP"' EXIT
 if gh repo view "$REPO" >/dev/null 2>&1; then
   gh repo clone "$REPO" "$TMP/r" -- --depth 1 -q || die "فشل تنزيل المستودع."
   ( cd "$TMP/r" && git rm -rq --ignore-unmatch . >/dev/null 2>&1; find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} + )
@@ -71,7 +59,7 @@ tar -C "$HERE" --exclude=./.git --exclude=./output --exclude=./work --exclude=./
   if git diff --cached --quiet; then
     echo "   (مفيش تغييرات جديدة للرفع — هكمّل للبناء)"
   else
-    git commit -q -m "reels maker update $(date +%Y-%m-%d_%H:%M)" || exit 1
+    git commit -q -m "reels maker v4.3: in-app tiktok accounts, server-side posting" || exit 1
     if gh repo view "$REPO" >/dev/null 2>&1; then
       git remote get-url origin >/dev/null 2>&1 || git remote add origin "https://github.com/$REPO.git"
       git push -q origin HEAD:main || exit 1
@@ -80,47 +68,58 @@ tar -C "$HERE" --exclude=./.git --exclude=./output --exclude=./work --exclude=./
     fi
   fi
 ) || die "فشل رفع التحديث للمستودع."
-gh repo edit "$REPO" --visibility public --accept-visibility-change-consequences >/dev/null 2>&1 || true
+[ "${REELS_PUBLIC:-0}" = 1 ] && gh repo edit "$REPO" --visibility public --accept-visibility-change-consequences >/dev/null 2>&1
 gh api -X PUT "repos/$REPO/actions/permissions/workflow" -f default_workflow_permissions=write >/dev/null 2>&1 \
   || echo "⚠️ اضبط يدويًا: Settings ← Actions ← General ← Workflow permissions ← Read and write"
 
-# 5) مفتاح التطبيق (مرة واحدة بس)
-HAVE=0
-# APP_TOKEN_V2 = علامة إن التوكن اتعمل بصلاحية Contents (لازمة لخزنة الحسابات المشفّرة والنشر التلقائي)
-gh secret list -R "$REPO" 2>/dev/null | awk '{print $1}' | grep -qx APP_TOKEN && \
-  gh secret list -R "$REPO" 2>/dev/null | awk '{print $1}' | grep -qx APP_TOKEN_V2 && HAVE=1
-if [ "$HAVE" = 1 ] && [ "${RESET_TOKEN:-0}" != 1 ]; then
-  echo "5/6 مفتاح التطبيق موجود من قبل ✓ (لتغييره شغّل: RESET_TOKEN=1 bash termux-update.sh)"
+# 5) مفتاح التطبيق: بيتحفظ على موبايلك ويتفحص كل مرة. لو اتمسح أو انتهى من GitHub بيطلب واحد جديد لوحده.
+KF="$HOME/.reels-app-token"
+tok_ok() { # $1 = توكن
+  [ -n "$1" ] && [ "$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $1" \
+    -H "Accept: application/vnd.github+json" "https://api.github.com/repos/$REPO/actions/workflows" || true)" = "200" ]
+}
+TOKEN=""
+[ -f "$KF" ] && [ "${RESET_TOKEN:-0}" != 1 ] && TOKEN=$(cat "$KF")
+if tok_ok "$TOKEN"; then
+  echo "5/6 مفتاح التطبيق شغّال ✓"
 else
+  TOKEN=""
   echo
-  echo "🔑 5/6 هنعمل مفتاح صغير بيخلّي التطبيق يشغّل الخدمة (مرة واحدة بس):"
+  echo "🔑 5/6 محتاجين مفتاح جديد (مرة واحدة بس، وبعدها بيتحفظ ويتجدد بنفسه لما يلزم):"
   echo "   هيفتح صفحة GitHub. اعمل:"
   echo "     • Repository access  ←  Only select repositories  ←  reels-maker"
-  echo "     • Permissions  ←  Actions: Read and write   +   Contents: Read and write   (الاتنين بس)"
+  echo "     • Permissions  ←  Actions: Read and write   (الصلاحية دي بس)"
   echo "     • اختار أطول مدة صلاحية، واضغط Generate token وانسخ التوكن (بيبدأ بـ github_pat_)"
   sleep 3
-  termux-open-url "https://github.com/settings/personal-access-tokens/new?name=reels-app&description=ReelsMaker+app&expires_in=365&actions=write&contents=write" || true
-  TOKEN=""
+  termux-open-url "https://github.com/settings/personal-access-tokens/new?name=reels-app&description=ReelsMaker+app&expires_in=365&actions=write" || true
   for try in 1 2 3; do
     printf "الصق التوكن هنا (مش هيظهر وإنت بتلصق) ثم Enter: "
     read -rs TOKEN; echo
-    code=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $TOKEN" \
-      -H "Accept: application/vnd.github+json" "https://api.github.com/repos/$REPO/actions/workflows" || true)
-    [ "$code" = "200" ] && break
-    echo "❌ التوكن مش شغّال (كود $code). اتأكد من الصلاحيتين (Actions + Contents) ومن اختيار reels-maker."
+    tok_ok "$TOKEN" && break
+    echo "❌ التوكن مش شغّال. اتأكد من الصلاحيتين ومن اختيار reels-maker."
     TOKEN=""
   done
   [ -n "$TOKEN" ] || die "وقفنا. اعمل التوكن صح وشغّل الأمر تاني."
-  # لازم يقدر يكتب في المستودع (فرع vault للخزنة المشفّرة): نجرّب نعمل الفرع بالتوكن نفسه
-  MSHA=$(gh api "repos/$REPO/git/ref/heads/main" --jq .object.sha 2>/dev/null || true)
-  if ! gh api "repos/$REPO/git/ref/heads/vault" >/dev/null 2>&1 && [ -n "$MSHA" ]; then
-    vc=$(curl -s -o /dev/null -w "%{http_code}" -X POST -H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.github+json" \
-      "https://api.github.com/repos/$REPO/git/refs" -d "{\"ref\":\"refs/heads/vault\",\"sha\":\"$MSHA\"}" || true)
-    [ "$vc" = "201" ] || [ "$vc" = "422" ] || die "التوكن مالوش صلاحية Contents: Read and write (كود $vc). اعمله تاني بالصلاحية دي وشغّل: RESET_TOKEN=1 bash termux-update.sh"
-  fi
-  gh secret set APP_TOKEN -R "$REPO" --body "$TOKEN" >/dev/null || die "فشل حفظ التوكن."
-  gh secret set APP_TOKEN_V2 -R "$REPO" --body "1" >/dev/null || true
-  unset TOKEN
+  ( umask 077; printf '%s' "$TOKEN" > "$KF" )
+fi
+# نحدّث الـ Secret دايمًا بالتوكن السليم (عشان لو التوكن القديم اتحذف من GitHub، التطبيق الجديد ياخد الجديد)
+gh secret set APP_TOKEN -R "$REPO" --body "$TOKEN" >/dev/null || die "فشل حفظ التوكن."
+unset TOKEN
+
+# 5.5) مفتاح تشفير حسابات التك توك (بيتعمل مرة واحدة: العام جوه التطبيق، والخاص عند GitHub بس)
+if [ -z "$(gh variable get TT_PUB -R "$REPO" 2>/dev/null)" ] || [ "${RESET_KEYS:-0}" = 1 ]; then
+  echo "🔐 بعمل مفتاح تشفير لكلمات سر التك توك (مرة واحدة)..."
+  pkg install -y openssl-tool >/dev/null 2>&1 || true
+  KD="$(mktemp -d)"
+  openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "$KD/priv.pem" >/dev/null 2>&1 || die "فشل توليد المفتاح (جرّب: pkg install openssl-tool)"
+  PUB=$(openssl pkey -in "$KD/priv.pem" -pubout -outform DER 2>/dev/null | base64 -w0)
+  [ -n "$PUB" ] || die "فشل استخراج المفتاح العام."
+  gh secret set TT_PRIV -R "$REPO" < "$KD/priv.pem" >/dev/null || die "فشل حفظ المفتاح الخاص."
+  gh variable set TT_PUB -R "$REPO" --body "$PUB" >/dev/null || die "فشل حفظ المفتاح العام."
+  rm -rf "$KD"
+  [ "${RESET_KEYS:-0}" = 1 ] && echo "⚠️ المفتاح اتغيّر: أعد إضافة حسابات التك توك من التطبيق."
+else
+  echo "🔐 مفتاح التشفير موجود ✓"
 fi
 
 # 6) بناء التطبيق على السيرفر وتنزيله
@@ -155,14 +154,7 @@ if [ "$CON" != "success" ]; then
   die "البناء فشل. ابعت لي الأسطر اللي فوق."
 fi
 
-GOT=0
-for _ in 1 2 3 4; do
-  gh release download apk-latest -R "$REPO" -p ReelsMaker.apk -D "$D" --clobber >/dev/null 2>&1 && { GOT=1; break; }
-  sleep 5
-done
-[ "$GOT" = 1 ] || die "فشل تنزيل الـ APK."
-# الـ APK جواه مفتاح التطبيق، فمنسيبوش منشور على الإنترنت بعد ما نزل عندك
-gh release delete apk-latest --cleanup-tag -y >/dev/null 2>&1 || true
+gh release download apk-latest -R "$REPO" -p ReelsMaker.apk -D "$D" --clobber >/dev/null 2>&1 || die "فشل تنزيل الـ APK."
 SZ=$(stat -c %s "$D/ReelsMaker.apk" 2>/dev/null || echo 0)
 [ "$SZ" -gt 100000 ] || die "ملف الـ APK ناقص أو تالف."
 echo

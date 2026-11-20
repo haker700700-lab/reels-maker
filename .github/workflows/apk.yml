@@ -25,9 +25,9 @@ jobs:
         env:
           ORG_GRADLE_PROJECT_appToken: ${{ secrets.APP_TOKEN }}
           ORG_GRADLE_PROJECT_appRepo: ${{ github.repository }}
+          ORG_GRADLE_PROJECT_ttPub: ${{ vars.TT_PUB }}
         run: |
           [ -n "$ORG_GRADLE_PROJECT_appToken" ] || { echo "::error::الـ Secret اسمه APP_TOKEN مش متضاف"; exit 1; }
-          export ORG_GRADLE_PROJECT_verCode=$((100 + GITHUB_RUN_NUMBER))
           gradle -p android assembleDebug --no-daemon
       - name: نشر الـ APK
         env:

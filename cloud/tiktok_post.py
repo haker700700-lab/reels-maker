@@ -1,0 +1,214 @@
+#!/usr/bin/env python3
+"""ينشر ريلز على حسابات تك توك بتاعتك من سيرفر GitHub (متصفح عادي بيدخل ويرفع زي المستخدم).
+- الحسابات في Secrets باسم TT_ACC_<اسم> وقيمتها {"user":"...","pass":"..."} (مشفّرة عند GitHub).
+- بعد أول دخول بتتحفظ الجلسة (كوكيز) في كاش المستودع، فالدخول بالباسورد بيحصل نادرًا.
+- لو التك توك طلب كابتشا/تحقق/كود 2FA: بنقف عند الحساب ده ونسجّل السبب. مش بنحاول نتخطّاه.
+ملاحظة: واجهة التك توك بتتغيّر، ولو أي عنصر اتغيّر هتلاقي السبب في التقرير."""
+import glob, json, os, re, sys, time
+from pathlib import Path
+
+from playwright.sync_api import sync_playwright
+
+STATE = Path(os.environ.get("TT_STATE_DIR", "tt_state"))
+SHOTS = Path("tt_shots")
+UPLOAD = "https://www.tiktok.com/tiktokstudio/upload"
+LOGIN = "https://www.tiktok.com/login/phone-or-email/email"
+GAP = int(os.environ.get("TT_GAP", "45"))          # ثواني بين كل نشرتين
+CAPTION = os.environ.get("TT_CAPTION", "").strip()
+DIR = os.environ.get("TT_DIR", "")
+STATE.mkdir(exist_ok=True)
+SHOTS.mkdir(exist_ok=True)
+
+
+class Blocked(Exception):
+    pass
+
+
+def log(m):
+    print(m, flush=True)
+
+
+def accounts():
+    """بيفك تشفير الحسابات اللي بعتها التطبيق (RSA) بالمفتاح الخاص من Secret TT_PRIV."""
+    import base64
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import padding
+    try:
+        items = json.loads(os.environ.get("TT_ACCS", "[]"))
+        key = serialization.load_pem_private_key(os.environ["TT_PRIV"].encode(), None)
+    except Exception:
+        log("⚠️ مفيش حسابات، أو مفتاح فك التشفير (TT_PRIV) ناقص")
+        return []
+    oaep = padding.OAEP(mgf=padding.MGF1(hashes.SHA1()), algorithm=hashes.SHA1(), label=None)
+    out = []
+    for it in items:
+        try:
+            user, pw = key.decrypt(base64.b64decode(it["e"]), oaep).decode("utf-8").split("\n", 1)
+            name = re.sub(r"[^A-Za-z0-9_-]", "", str(it.get("n", ""))) or f"acc{len(out) + 1}"
+            out.append({"name": name, "user": user, "pass": pw})
+            print(f"::add-mask::{pw}")
+        except Exception:
+            log(f"⚠️ الحساب {it.get('n', '?')}: مش قادر أفك تشفيره (أضفه تاني من التطبيق لو المفتاح اتغيّر)")
+    return out
+
+
+def shot(page, name):
+    try:
+        page.screenshot(path=str(SHOTS / f"{name}.png"))
+    except Exception:
+        pass
+
+
+def check_block(page):
+    """كابتشا أو تحقق إضافي: نقف ونبلّغ، مش بنحل حاجة."""
+    try:
+        txt = page.inner_text("body", timeout=3000).lower()
+    except Exception:
+        txt = ""
+    sel = "#captcha_container, .captcha-verify-container, [class*='captcha'], iframe[src*='captcha']"
+    if page.locator(sel).count() > 0 or any(
+        w in txt for w in ("drag the slider", "verify it's you", "verification code", "enter the code", "too many attempts")
+    ):
+        raise Blocked("التك توك طلب تحقق (كابتشا/كود). افتح الحساب مرة من موبايلك ووافق على الدخول ثم جرّب تاني")
+
+
+def find(page, selector):
+    for fr in page.frames:
+        loc = fr.locator(selector)
+        if loc.count() > 0:
+            return loc.first
+    return None
+
+
+def ensure_login(page, acc):
+    page.goto(UPLOAD, wait_until="domcontentloaded")
+    page.wait_for_timeout(6000)
+    if "login" not in page.url and find(page, 'input[type="file"]'):
+        return "session"
+    page.goto(LOGIN, wait_until="domcontentloaded")
+    page.wait_for_timeout(3000)
+    user = page.locator('input[name="username"]')
+    pw = page.locator('input[type="password"]')
+    if user.count() == 0 or pw.count() == 0:
+        shot(page, f"{acc['name']}_login_form")
+        raise Blocked("صفحة الدخول مختلفة عن المتوقع")
+    user.first.fill(acc["user"])
+    pw.first.fill(acc["pass"])
+    page.locator('button[type="submit"], button[data-e2e="login-button"]').first.click()
+    page.wait_for_timeout(9000)
+    check_block(page)
+    page.goto(UPLOAD, wait_until="domcontentloaded")
+    page.wait_for_timeout(6000)
+    check_block(page)
+    if "login" in page.url or not find(page, 'input[type="file"]'):
+        shot(page, f"{acc['name']}_after_login")
+        raise Blocked("الدخول ماتمش (بيانات غلط أو تحقق إضافي)")
+    return "password"
+
+
+def post_one(page, video, caption, tag):
+    page.goto(UPLOAD, wait_until="domcontentloaded")
+    page.wait_for_timeout(5000)
+    check_block(page)
+    fi = find(page, 'input[type="file"]')
+    if not fi:
+        raise Blocked("مش لاقي خانة رفع الفيديو")
+    fi.set_input_files(video)
+    # استنى لحد ما الرفع يخلص ويبقى زر النشر شغّال
+    btn = None
+    for _ in range(100):  # حتى ~5 دقايق
+        page.wait_for_timeout(3000)
+        check_block(page)
+        b = find(page, 'button[data-e2e="post_video_button"]')
+        if b and b.get_attribute("aria-disabled") != "true" and b.is_enabled():
+            btn = b
+            break
+    if not btn:
+        shot(page, f"{tag}_upload")
+        raise Blocked("الرفع ماخلصش في الوقت المناسب أو زر النشر مش ظاهر")
+    if caption:
+        ed = find(page, 'div[contenteditable="true"]')
+        if ed:
+            ed.click()
+            page.keyboard.press("Control+A")
+            page.keyboard.press("Delete")
+            page.keyboard.type(caption, delay=15)
+    page.wait_for_timeout(1500)
+    btn.click()
+    page.wait_for_timeout(2500)
+    for label in ("Post now", "Post", "Continue"):  # نافذة تأكيد لو ظهرت
+        d = page.get_by_role("button", name=label, exact=True)
+        if d.count() > 0 and d.first.is_visible():
+            d.first.click()
+            break
+    ok = re.compile(r"(video|post).*(uploaded|published|posted)|manage your posts|being uploaded", re.I)
+    for _ in range(40):
+        page.wait_for_timeout(2500)
+        check_block(page)
+        if "tiktokstudio/content" in page.url or page.get_by_text(ok).count() > 0:
+            return
+    shot(page, f"{tag}_post")
+    raise Blocked("ماقدرتش أتأكد إن النشر تم")
+
+
+def main():
+    vids = sorted(glob.glob(os.path.join(DIR, "reel_*.mp4")))
+    accs = accounts()
+    res = {"ok": 0, "fail": 0, "notes": []}
+    if not vids or not accs:
+        res["notes"].append("مفيش فيديوهات أو مفيش حسابات متضافة")
+        write(res, len(vids), len(accs))
+        return
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        ctx = {}
+        for a in accs:
+            sf = STATE / f"{a['name']}.json"
+            try:
+                c = browser.new_context(locale="en-US", viewport={"width": 1280, "height": 900},
+                                        storage_state=str(sf) if sf.exists() else None)
+                pg = c.new_page()
+                how = ensure_login(pg, a)
+                c.storage_state(path=str(sf))
+                ctx[a["name"]] = (c, pg)
+                log(f"✅ {a['name']}: دخول ({how})")
+            except Exception as e:
+                res["notes"].append(f"{a['name']}: {str(e)[:150]}")
+                log(f"❌ {a['name']}: {e}")
+        total = len(vids) * len(ctx)
+        first = True
+        for i, v in enumerate(vids, 1):      # فيديو فيديو على كل الحسابات
+            for name, (c, pg) in list(ctx.items()):
+                if not first:
+                    time.sleep(GAP)
+                first = False
+                try:
+                    post_one(pg, v, CAPTION, f"{name}_{i}")
+                    res["ok"] += 1
+                    log(f"✅ {name}: فيديو {i}/{len(vids)}")
+                except Exception as e:
+                    res["fail"] += 1
+                    res["notes"].append(f"{name} فيديو {i}: {str(e)[:150]}")
+                    log(f"❌ {name} فيديو {i}: {e}")
+                    if isinstance(e, Blocked) and "تحقق" in str(e):
+                        ctx.pop(name, None)  # وقف الحساب ده
+            for name, (c, pg) in ctx.items():
+                try:
+                    c.storage_state(path=str(STATE / f"{name}.json"))
+                except Exception:
+                    pass
+        browser.close()
+    write(res, len(vids), len(accs))
+
+
+def write(res, nv, na):
+    line = f"نُشر {res['ok']} (فيديوهات {nv} × حسابات {na})"
+    if res["fail"] or res["notes"]:
+        line += f" — فشل {res['fail']}"
+    body = line + ("\n" + "\n".join(res["notes"][:8]) if res["notes"] else "")
+    Path("tt_result.txt").write_text(body, encoding="utf-8")
+    log(body)
+
+
+if __name__ == "__main__":
+    main()

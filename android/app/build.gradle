@@ -7,11 +7,11 @@ android {
         applicationId 'com.reelsmaker.app'
         minSdk 23
         targetSdk 34
-        // بيزيد لوحده مع كل بناء على GitHub (100 + رقم التشغيل) عشان التحديث دايمًا يتثبت فوق القديم
-        versionCode Integer.parseInt((project.findProperty('verCode') ?: '5').toString())
-        versionName '4.2'
+        versionCode 7
+        versionName '4.3'
         // بتتحقن وقت البناء على GitHub من الـ Secret (مش متكتوبة في الكود)
         buildConfigField "String", "APP_TOKEN", "\"${project.findProperty('appToken') ?: ''}\""
+        buildConfigField "String", "TT_PUB", "\"${project.findProperty('ttPub') ?: ''}\""
         buildConfigField "String", "APP_REPO", "\"${project.findProperty('appRepo') ?: ''}\""
     }
     buildFeatures { buildConfig true }

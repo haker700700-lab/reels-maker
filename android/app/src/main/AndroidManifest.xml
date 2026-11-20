@@ -24,12 +24,10 @@
         </activity>
         <activity android:name=".FeaturesActivity" android:exported="false"
             android:screenOrientation="portrait" />
-        <activity android:name=".SocialActivity" android:exported="false"
+        <activity android:name=".TikTokActivity" android:exported="false"
             android:screenOrientation="portrait" />
-        <activity android:name=".ScheduleActivity" android:exported="false"
-            android:screenOrientation="portrait" />
-        <activity android:name=".OAuthActivity" android:exported="false"
-            android:screenOrientation="portrait" />
+        <provider android:name=".VideoProvider" android:authorities="com.reelsmaker.app.videos"
+            android:exported="false" android:grantUriPermissions="true" />
         <service android:name=".JobService" android:exported="false"
             android:foregroundServiceType="dataSync" />
         <receiver android:name=".BootReceiver" android:exported="true">
