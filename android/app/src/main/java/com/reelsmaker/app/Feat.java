@@ -8,6 +8,9 @@ final class Feat {
     static final String F_N = "5", F_MIN = "15", F_MAX = "25", F_RES = "1080";
     static final String F_TEXT = "لمشاهدة وتحميل كاملا الرابط في البايو الملف الشخصي";
     static final boolean F_REV = false, F_MUS = false;
+    // موسيقى الخلفية: مستوى الصوت (8 قياسية • 15 وسط • 25 عالية) + رابط موسيقى + أغاني الفيديو الأساسية (تلقائي) + وضع الريأكشن
+    static final String F_MVOL = "8", F_MURL = "";
+    static final boolean F_RSONG = true, F_REACT = false;
 
     // رقم كل خاصية (لازم يطابق ترتيب ID)
     static final int CROP = 0, BEST = 1, FACE = 2;
@@ -27,8 +30,8 @@ final class Feat {
             "ملف موسيقى لوحده جنب الريلز"};
     static final boolean[] DEF = {true, true, true, true, true, false, false, false};
 
-    static final String[] STR_KEYS = {"n", "min", "max", "res", "text"};
-    static final String[] BOOL_KEYS = {"rev", "mus"};
+    static final String[] STR_KEYS = {"n", "min", "max", "res", "text", "mvol", "murl"};
+    static final String[] BOOL_KEYS = {"rev", "mus", "rsong", "react"};
 
     private Feat() { }
 

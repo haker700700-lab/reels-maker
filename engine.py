@@ -1677,10 +1677,64 @@ def make_builtin_music(path):
     return r.returncode == 0 and os.path.exists(path), r.stderr[-300:]
 
 
+def fetch_audio_direct(url, workdir, max_mb=40):
+    """تحميل مباشر لملف صوت (mp3/m4a/wav... أو ملف إصدار GitHub). بيرجّع المسار أو None لو فشل."""
+    dst = os.path.join(workdir, "music_dl.bin")
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "*/*"})
+        with urllib.request.urlopen(req, timeout=60) as r, open(dst, "wb") as f:
+            total = 0
+            while True:
+                _chk()
+                b = r.read(1 << 16)
+                if not b:
+                    break
+                total += len(b)
+                if total > max_mb * 1048576:
+                    return None
+                f.write(b)
+        return dst if os.path.getsize(dst) > 2048 else None
+    except Cancelled:
+        raise
+    except Exception:
+        return None
+
+
 def convert_music(src, dst):
     r = run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", src, "-vn", "-ac", "2", "-ar", "44100",
              "-af", "loudnorm=I=-14:TP=-2:LRA=7,aresample=44100", dst])
     return r.returncode == 0 and os.path.exists(dst)
+
+
+def detect_song(src, dur):
+    """تقدير بسيط: هل صوت الفيديو أغنية/موسيقى مستمرة؟ (الكلام فيه وقفات كتير، الأغاني طاقتها مستمرة).
+    بياخد ٣ عينات (٢٥٪ و٥٠٪ و٧٥٪ من الفيديو) ومعاها بيقرّر بالأغلبية. تقدير مش مضمون ١٠٠٪."""
+    if np is None or not dur or dur <= 0:
+        return False
+    sr, chunk = 8000, 25.0
+    votes, valid = 0, 0
+    for frac in (0.25, 0.5, 0.75):
+        st = max(0.0, min(dur - chunk, dur * frac - chunk / 2)) if dur > chunk else 0.0
+        r = subprocess.run(["ffmpeg", "-v", "error", "-nostdin", "-ss", f"{st:.2f}", "-t", f"{min(chunk, dur):.2f}", "-i", src,
+                            "-vn", "-ac", "1", "-ar", str(sr), "-f", "f32le", "-"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        a = np.frombuffer(r.stdout[: len(r.stdout) // 4 * 4], dtype=np.float32)
+        fl = int(sr * 0.05)
+        n = a.size // fl
+        if n < 40:
+            continue
+        e = np.sqrt(np.mean(a[: n * fl].reshape(n, fl) ** 2, axis=1))
+        med = float(np.median(e))
+        if med < 0.004:          # شبه صمت: مش بنحكم
+            continue
+        valid += 1
+        pause = float(np.mean(e < 0.18 * med))                       # نسبة الوقفات (الكلام عالي فيها)
+        k = max(1, int(1.0 / 0.05))
+        m = n // k
+        sec = e[: m * k].reshape(m, k).mean(axis=1)
+        cv = float(np.std(sec) / (np.mean(sec) + 1e-9))               # تذبذب الطاقة بين الثواني
+        if pause < 0.06 and cv < 0.55:
+            votes += 1
+    return valid > 0 and votes * 2 > valid
 
 
 # ════════════════════════════════════════════════════════════
@@ -1701,6 +1755,10 @@ def build_cmd(src, start, length, out, P, text_png, music, use_text, use_music, 
         idx += 1
 
     enh = ",eq=contrast=1.04:saturation=1.10,unsharp=5:5:0.6:3:3:0.0" if P["enhance"] else ""
+    zoom = P.get("zoom", 1.0)
+    if zoom > 1.0:   # وضع الريأكشن: تكبير بسيط من المنتصف + لمسة ألوان
+        enh += (f",scale={int(W * zoom) // 2 * 2}:{int(H * zoom) // 2 * 2},crop={W}:{H}"
+                ",eq=contrast=1.03:saturation=1.06:gamma=1.02")
     tail = (f",setpts={1/spd:.5f}*PTS" if spd != 1 else "") + (",reverse" if P["reverse"] else "")
     if P["fill"] == "blur":
         bw, bh = (W // 4) // 2 * 2, (H // 4) // 2 * 2
@@ -1733,7 +1791,7 @@ def build_cmd(src, start, length, out, P, text_png, music, use_text, use_music, 
     elif use_orig:
         fa = f"{a0},loudnorm=I=-16:TP=-1.5:LRA=11,aresample=44100,{fade}[a]"
     elif m_idx is not None:
-        fa = f"[{m_idx}:a]{base_a},volume=0.5,{fade}[a]"
+        fa = f"[{m_idx}:a]{base_a},volume={P.get('msolo', 0.5)},{fade}[a]"
     else:
         fa = None
     fc = vf + (";" + fa if fa else "")
@@ -1795,8 +1853,14 @@ def normalize_settings(raw, need_rights=True):
         "music_src": str(g("music_src", "موسيقى هادئة مدمجة")),
         "music_url": str(g("music_url", "") or ""),
         "mvol": to_int(g("mvol", 8), 8, 1, 30),
+        # أغاني الفيديو الأساسية: لو الفيديو فيه أغنية، بتتبدّل بالموسيقى الأساسية (تلقائي). الأصل هنا False عشان السلوك القديم ما يتغيّرش.
+        "rsong": bool(g("rsong", False)),
+        # وضع الريأكشن: تأثيرات تحرير خفيفة (تكبير بسيط + ألوان + سرعة ١.٠٣)
+        "react": bool(g("react", False)),
         "rights": bool(g("rights", False)),
     }
+    # مستوى الموسيقى لما تكون هي الصوت الوحيد (أعلى من مستوى الخلفية تحت الكلام): ٨→٠.٤٥ • ١٥→٠.٦٢ • ٢٥→٠.٨٧
+    S["msolo"] = round(min(1.0, 0.25 + S["mvol"] * 0.025), 3)
     # الخصائص (مربعات التطبيق): feat = "crop,best,face,..." أو "none". لو مش موجودة = السلوك القديم بالظبط.
     fr = g("feat", None)
     FT = None
@@ -1914,6 +1978,10 @@ def _main(raw):
         fill = "crop" if 0.8 <= r <= 1.25 else "blur"
         say("الملء التلقائي: " + ("قص الأطراف (الفيديو قريب من المقاس)" if fill == "crop" else "خلفية مغبشة (عشان الفيديو كله يفضل ظاهر)"))
     spd = S["spd"]
+    if S["react"]:
+        if spd == 1.0:
+            spd = 1.03
+        say("وضع الريأكشن شغّال: تكبير بسيط + لمسة ألوان + سرعة ١.٠٣.", "info")
     min_l, max_l = S["min_l"], S["max_l"]
     n_req = S["n"]
     if dur < min_l:
@@ -1976,13 +2044,29 @@ def _main(raw):
             text_png = None
 
     # ---------- 4) الموسيقى ----------
+    song_found = False
+    if S["rsong"] and info["has_audio"]:
+        try:
+            song_found = detect_song(src, dur)
+        except Cancelled:
+            raise
+        except Exception:
+            song_found = False
+        say("«أغاني الفيديو الأساسية»: " + ("لقيت أغنية/موسيقى في الفيديو — هتتبدّل بالموسيقى الأساسية." if song_found
+            else "مالقيتش أغنية واضحة — هسيب صوت الفيديو زي ما هو."), "ok" if song_found else "info")
     music = None
-    if S["music_on"] or S["music_file"]:
+    if S["music_on"] or S["music_file"] or song_found:
         prog.update("بجهّز الموسيقى...", force=True)
         music = WORK + "/music.wav"
         try:
             if S["music_src"].startswith("رابط") and S["music_url"].strip():
-                mp, _, _ = fetch_media(S["music_url"], WORK, "music_src", opts, prog, need_video=False)
+                mu = S["music_url"].strip()
+                mp = None
+                if re.match(r"https?://", mu) and (re.search(r"\.(mp3|m4a|aac|wav|ogg|oga|opus|flac|wma)(\?|$)", mu, re.I)
+                                                    or "/releases/download/" in mu):
+                    mp = fetch_audio_direct(mu, WORK)
+                if not mp:
+                    mp, _, _ = fetch_media(mu, WORK, "music_src", opts, prog, need_video=False)
                 if not convert_music(mp, music):
                     raise UserError("تعذّر تحويل الموسيقى.")
             else:
@@ -1999,9 +2083,10 @@ def _main(raw):
             say(f"الموسيقى: {e} — هكمّل بدون موسيقى.", "warn")
             music = None
 
-    mix = music if S["music_on"] else None      # الموسيقى اللي بتتدمج جوه الفيديو (لو الزر مفعّل)
+    mix = music if (S["music_on"] or song_found) else None      # الموسيقى اللي بتتدمج جوه الفيديو (لو الزر مفعّل أو الأغنية اتبدّلت)
     P = {"W": W, "H": H, "spd": spd, "fill": fill, "enhance": S["enhance"], "reverse": reverse,
-         "use_orig": bool(S["use_orig"] and info["has_audio"]), "mvol": S["mvol"] / 100,
+         "use_orig": bool(S["use_orig"] and info["has_audio"] and not song_found), "mvol": S["mvol"] / 100,
+         "msolo": S["msolo"], "zoom": 1.06 if S["react"] else 1.0,
          "denoise": S["denoise"] and info["has_audio"], "fade": S["fade"]}
     if S["use_orig"] and not info["has_audio"]:
         say("الفيديو الأصلي مفيهوش صوت.", "warn")

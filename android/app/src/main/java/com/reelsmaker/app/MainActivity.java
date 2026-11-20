@@ -13,6 +13,7 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.PowerManager;
+import android.provider.OpenableColumns;
 import android.provider.Settings;
 import android.text.InputType;
 import android.text.TextUtils;
@@ -23,9 +24,16 @@ import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
+import android.widget.ScrollView;
 import android.widget.TextView;
 
 import org.json.JSONObject;
+
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URLEncoder;
 
 /**
  * صانع الريلز: بتلصق الرابط وبس. الشغل كله على سيرفرات GitHub المجانية،
@@ -34,10 +42,11 @@ import org.json.JSONObject;
  */
 public class MainActivity extends Activity {
     SharedPreferences sp;
-    EditText link, count, minL, maxL, text;
-    String resv = Feat.F_RES;
-    Button q720, q1080, go, last, battery, feats;
-    CheckBox reverse, music, rights;
+    EditText link, count, minL, maxL, text, musicUrl;
+    String resv = Feat.F_RES, mvolv = Feat.F_MVOL;
+    Button q720, q1080, go, last, battery, feats, mvStd, mvMid, mvHigh, pickMusic;
+    CheckBox reverse, music, rights, rsong, react;
+    static final int REQ_MUSIC = 21;
     TextView status;
     ProgressBar bar;
     final SharedPreferences.OnSharedPreferenceChangeListener listener = (p, k) -> runOnUiThread(this::render);
@@ -122,6 +131,14 @@ public class MainActivity extends Activity {
         q1080.setBackground(shape("1080".equals(resv) ? ACC : CARD, 12));
     }
 
+    /** مستوى صوت الموسيقى: 8 = قياسية • 15 = وسط • 25 = عالية. */
+    void setMvol(String v) {
+        mvolv = "15".equals(v) ? "15" : "25".equals(v) ? "25" : "8";
+        mvStd.setBackground(shape("8".equals(mvolv) ? ACC : CARD, 12));
+        mvMid.setBackground(shape("15".equals(mvolv) ? ACC : CARD, 12));
+        mvHigh.setBackground(shape("25".equals(mvolv) ? ACC : CARD, 12));
+    }
+
     /** بيحمّل القيم (الحالية، وإلا الافتراضي المحفوظ، وإلا الأصلي) في الخانات. */
     void loadFromPrefs() {
         count.setText(Feat.str(sp, "n", Feat.F_N));
@@ -131,6 +148,10 @@ public class MainActivity extends Activity {
         text.setText(Feat.str(sp, "text", Feat.F_TEXT));
         reverse.setChecked(Feat.bool(sp, "rev", Feat.F_REV));
         music.setChecked(Feat.bool(sp, "mus", Feat.F_MUS));
+        setMvol(Feat.str(sp, "mvol", Feat.F_MVOL));
+        musicUrl.setText(Feat.str(sp, "murl", Feat.F_MURL));
+        rsong.setChecked(Feat.bool(sp, "rsong", Feat.F_RSONG));
+        react.setChecked(Feat.bool(sp, "react", Feat.F_REACT));
     }
 
     /** بيحفظ اللي على الشاشة كقيم حالية (عشان شاشة الخصائص تقدر تحفظها كافتراضي). */
@@ -141,7 +162,11 @@ public class MainActivity extends Activity {
                 .putString("res", resv)
                 .putString("text", text.getText().toString())
                 .putBoolean("rev", reverse.isChecked())
-                .putBoolean("mus", music.isChecked()).apply();
+                .putBoolean("mus", music.isChecked())
+                .putString("mvol", mvolv)
+                .putString("murl", musicUrl.getText().toString().trim())
+                .putBoolean("rsong", rsong.isChecked())
+                .putBoolean("react", react.isChecked()).apply();
     }
 
     @Override
@@ -231,6 +256,47 @@ public class MainActivity extends Activity {
         music = check(cr, "موسيقى خلفية", false);
         root.addView(cr);
 
+        // مستوى صوت الموسيقى (قياسية / وسط / عالية)
+        LinearLayout vr = new LinearLayout(this);
+        vr.setGravity(Gravity.CENTER_VERTICAL);
+        TextView vl = new TextView(this);
+        vl.setText("صوت الموسيقى");
+        vl.setTextSize(12);
+        vl.setTextColor(DIM);
+        vl.setPadding(dp(4), 0, dp(8), 0);
+        vr.addView(vl);
+        mvStd = pill("قياسية", true);
+        mvMid = pill("وسط", false);
+        mvHigh = pill("عالية", false);
+        mvStd.setOnClickListener(v -> setMvol("8"));
+        mvMid.setOnClickListener(v -> setMvol("15"));
+        mvHigh.setOnClickListener(v -> setMvol("25"));
+        vr.addView(mvStd, lp(0, dp(34), 1, 3));
+        vr.addView(mvMid, lp(0, dp(34), 1, 3));
+        vr.addView(mvHigh, lp(0, dp(34), 1, 3));
+        root.addView(vr);
+
+        // مصدر الموسيقى: رابط أو ملف من الجهاز (فاضي = الموسيقى الهادئة المدمجة)
+        label(root, "🎵 مصدر الموسيقى — رابط أو ملف (فاضي = المدمجة)");
+        LinearLayout mr = new LinearLayout(this);
+        musicUrl = box("https://... رابط موسيقى", "", InputType.TYPE_TEXT_VARIATION_URI);
+        musicUrl.setTextSize(12);
+        pickMusic = pill("📁 رفع", true);
+        pickMusic.setOnClickListener(v -> pickMusicFile());
+        mr.addView(musicUrl, lp(0, dp(40), 1, 0));
+        mr.addView(pickMusic, lp(dp(72), dp(40), 0, 0));
+        root.addView(mr);
+
+        // أغاني الفيديو الأساسية (تلقائي) + وضع الريأكشن
+        rsong = check(root, "🎶 أغاني الفيديو الأساسية (تلقائي)", true);
+        rsong.setOnClickListener(v -> toast(rsong.isChecked()
+                ? "لو الفيديو فيه أغنية، الموسيقى الأساسية هتشتغل مكانها تلقائيًا."
+                : "هيفضل صوت الفيديو الأصلي زي ما هو."));
+        react = check(root, "🎭 وضع الريأكشن (تأثيرات تحرير للفيديو)", false);
+        react.setOnClickListener(v -> toast(react.isChecked()
+                ? "تكبير بسيط + لمسة ألوان + سرعة 1.03. وده مش بيضمن تفادي أي مطالبة حقوق."
+                : "وضع الريأكشن اتقفل."));
+
         rights = check(root, "أؤكد أني أملك حقوق الفيديو أو مصرّح لي", false);
 
         feats = pill("✨ الخصائص والإعدادات", false);
@@ -301,7 +367,12 @@ public class MainActivity extends Activity {
 
         go.setOnClickListener(v -> start());
         last.setOnClickListener(v -> downloadLast());
-        setContentView(root);
+        // الصفحة بتفضل على شاشة واحدة؛ ولو الموبايل صغير والصف الإضافي مش مكفّي، بيتمرّر بدل ما الحالة تتقلّص
+        ScrollView sv = new ScrollView(this);
+        sv.setFillViewport(true);
+        sv.setBackgroundColor(BG);
+        sv.addView(root);
+        setContentView(sv);
 
         loadFromPrefs();
 
@@ -415,6 +486,10 @@ public class MainActivity extends Activity {
             in.put("reverse", String.valueOf(reverse.isChecked()));
             in.put("text", text.getText().toString());
             in.put("music", String.valueOf(music.isChecked()));
+            in.put("mvol", mvolv);
+            in.put("music_url", musicUrl.getText().toString().trim());
+            in.put("rsong", String.valueOf(rsong.isChecked()));
+            in.put("react", String.valueOf(react.isChecked()));
             in.put("feat", Feat.string(sp));
             boolean ttOn = sp.getBoolean("tt_server", false);
             if (ttOn && sp.getString("tt_accs", "[]").length() < 5) {
@@ -445,6 +520,120 @@ public class MainActivity extends Activity {
         link.setText("");   // الرابط الجاي جديد؛ باقي الإعدادات زي ما هي
         startJobService();
         render();
+    }
+
+    // ───────── رفع ملف موسيقى من الجهاز (بيترفع كملف إصدار على الريبو، ويتبعت رابطه للسيرفر) ─────────
+    void toast(String t) {
+        android.widget.Toast.makeText(this, t, android.widget.Toast.LENGTH_SHORT).show();
+    }
+
+    void pickMusicFile() {
+        if (noService()) return;
+        try {
+            Intent i = new Intent(Intent.ACTION_GET_CONTENT);
+            i.setType("audio/*");
+            i.addCategory(Intent.CATEGORY_OPENABLE);
+            startActivityForResult(Intent.createChooser(i, "اختار ملف موسيقى"), REQ_MUSIC);
+        } catch (Throwable e) {
+            status.setText("مفيش تطبيق ملفات يقدر يفتح الاختيار.");
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int req, int res, Intent data) {
+        super.onActivityResult(req, res, data);
+        if (req == REQ_MUSIC && res == RESULT_OK && data != null && data.getData() != null) uploadMusic(data.getData());
+    }
+
+    void uploadMusic(final Uri uri) {
+        status.setText("⏳ برفع الموسيقى...");
+        pickMusic.setEnabled(false);
+        new Thread(() -> {
+            String url = null, err = null;
+            try {
+                url = doUpload(uri);
+            } catch (Throwable e) {
+                err = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+            }
+            final String fu = url, fe = err;
+            runOnUiThread(() -> {
+                pickMusic.setEnabled(true);
+                if (fu != null) {
+                    musicUrl.setText(fu);
+                    saveCurrent();
+                    status.setText("✅ اترفعت الموسيقى. هتتستخدم في الريل الجاي.");
+                } else {
+                    status.setText("❌ فشل رفع الموسيقى: " + fe + "\nتقدر تلزق رابط مباشر بدل الرفع.");
+                }
+            });
+        }).start();
+    }
+
+    String doUpload(Uri uri) throws Exception {
+        String name = "music.mp3";
+        long size = -1;
+        try (android.database.Cursor c = getContentResolver().query(uri, null, null, null, null)) {
+            if (c != null && c.moveToFirst()) {
+                int ni = c.getColumnIndex(OpenableColumns.DISPLAY_NAME), si = c.getColumnIndex(OpenableColumns.SIZE);
+                if (ni >= 0 && c.getString(ni) != null) name = c.getString(ni);
+                if (si >= 0 && !c.isNull(si)) size = c.getLong(si);
+            }
+        } catch (Throwable ignored) { }
+        if (size > 25L * 1024 * 1024) throw new Exception("الملف أكبر من 25 م.ب");
+        String ext = name.contains(".") ? name.substring(name.lastIndexOf('.') + 1).toLowerCase() : "mp3";
+        if (!ext.matches("mp3|m4a|aac|wav|ogg|oga|opus|flac")) ext = "mp3";
+        ByteArrayOutputStream bo = new ByteArrayOutputStream();
+        try (InputStream in = getContentResolver().openInputStream(uri)) {
+            if (in == null) throw new Exception("تعذّرت قراءة الملف");
+            byte[] buf = new byte[1 << 16];
+            int n;
+            while ((n = in.read(buf)) > 0) {
+                bo.write(buf, 0, n);
+                if (bo.size() > 25 * 1024 * 1024) throw new Exception("الملف أكبر من 25 م.ب");
+            }
+        }
+        byte[] data = bo.toByteArray();
+        if (data.length < 2048) throw new Exception("الملف فاضي أو صغير جدًا");
+
+        // امسح موسيقى اتـرفعت قبل كده (عشان الريبو ما يتملاش)
+        String old = sp.getString("music_tag", "");
+        if (!old.isEmpty()) {
+            try {
+                String[] r = Gh.http("GET", Gh.API + "/repos/" + Gh.REPO + "/releases/tags/" + old, null);
+                if (r[0].startsWith("2")) {
+                    Gh.http("DELETE", Gh.API + "/repos/" + Gh.REPO + "/releases/" + new JSONObject(r[1]).getLong("id"), null);
+                }
+                Gh.http("DELETE", Gh.API + "/repos/" + Gh.REPO + "/git/refs/tags/" + old, null);
+            } catch (Throwable ignored) { }
+        }
+        String tag = "music-" + java.util.UUID.randomUUID().toString().replace("-", "").substring(0, 10);
+        String body = new JSONObject().put("tag_name", tag).put("name", "music").put("body", "music").put("prerelease", true).toString();
+        String[] cr = Gh.http("POST", Gh.API + "/repos/" + Gh.REPO + "/releases", body);
+        int code = Integer.parseInt(cr[0]);
+        if (code == 401 || code == 403 || code == 404) throw new Exception("التوكن مالوش صلاحية رفع ملفات على الريبو (محتاج Contents: write)");
+        if (code < 200 || code >= 300) throw new Exception("خطأ " + code);
+        long rid = new JSONObject(cr[1]).getLong("id");
+
+        String mime = "wav".equals(ext) ? "audio/wav" : "ogg".equals(ext) || "oga".equals(ext) || "opus".equals(ext) ? "audio/ogg"
+                : "m4a".equals(ext) || "aac".equals(ext) ? "audio/mp4" : "flac".equals(ext) ? "audio/flac" : "audio/mpeg";
+        String aname = "music." + ext;
+        HttpURLConnection c = Gh.open("POST", "https://uploads.github.com/repos/" + Gh.REPO + "/releases/" + rid + "/assets?name="
+                + URLEncoder.encode(aname, "UTF-8"), true);
+        try {
+            c.setReadTimeout(120000);
+            c.setDoOutput(true);
+            c.setRequestProperty("Content-Type", mime);
+            c.setFixedLengthStreamingMode(data.length);
+            try (OutputStream o = c.getOutputStream()) {
+                o.write(data);
+            }
+            int rc = c.getResponseCode();
+            if (rc < 200 || rc >= 300) throw new Exception("خطأ رفع " + rc);
+        } finally {
+            c.disconnect();
+        }
+        sp.edit().putString("music_tag", tag).apply();
+        return "https://github.com/" + Gh.REPO + "/releases/download/" + tag + "/" + aname;
     }
 
     void downloadLast() {
