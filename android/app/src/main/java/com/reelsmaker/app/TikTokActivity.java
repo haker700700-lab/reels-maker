@@ -34,6 +34,27 @@ public class TikTokActivity extends Activity {
     Button next;
     File pending;
     LinearLayout accList;
+    EditText nameBox;
+
+    @Override protected void onActivityResult(int req, int res, Intent data) {
+        super.onActivityResult(req, res, data);
+        if (req != 31 || res != RESULT_OK || data == null) return;
+        String ck = data.getStringExtra("cookies");
+        String n = nameBox.getText().toString().trim().replaceAll("[^A-Za-z0-9_-]", "");
+        if (ck == null || ck.isEmpty()) return;
+        if (n.isEmpty()) n = "acc" + (accounts().length() + 1);
+        try {
+            JSONArray a = accounts(), out = new JSONArray();
+            for (int i = 0; i < a.length(); i++) if (!a.getJSONObject(i).getString("n").equals(n)) out.put(a.getJSONObject(i));
+            out.put(new JSONObject().put("n", n).put("k", TikCrypto.encBlob(new JSONObject().put("cookies", ck).toString())));
+            sp.edit().putString("tt_accs", out.toString()).apply();
+            nameBox.setText("");
+            toast("اتضاف الحساب " + n + " ✓");
+            refreshAccs();
+        } catch (Exception e) {
+            toast("فشل حفظ الحساب");
+        }
+    }
 
     void toast(String m) { Toast.makeText(this, m, Toast.LENGTH_LONG).show(); }
 
@@ -70,6 +91,8 @@ public class TikTokActivity extends Activity {
             Button d = new Button(this);
             d.setText("حذف");
             d.setAllCaps(false);
+            d.setTextColor(Color.WHITE);
+            d.setBackgroundColor(0xFF3A2A4D);
             d.setOnClickListener(v -> {
                 try {
                     JSONArray cur = accounts(), out = new JSONArray();
@@ -110,6 +133,14 @@ public class TikTokActivity extends Activity {
         root.addView(h);
         root.addView(box("انشر على كل حساباتي من السيرفر أول ما الريلز تخلص", "tt_server", false));
         root.addView(box("من غير تنزيل أي ملف على جهازي (يوفّر النت)", "tt_nodl", false));
+        caption = new EditText(this);
+        caption.setHint("وصف الفيديو (اختياري — بيتنشر مع كل فيديو)");
+        caption.setHintTextColor(MainActivity.DIM);
+        caption.setTextColor(MainActivity.TXT);
+        caption.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+        caption.setText(sp.getString("tt_caption", ""));
+        root.addView(caption);
+
 
         TextView ha = new TextView(this);
         ha.setText("حسابات التك توك (كلمة السر بتتشفّر قبل الحفظ، والتطبيق نفسه مش بيقدر يقراها تاني)");
@@ -121,6 +152,24 @@ public class TikTokActivity extends Activity {
         accList.setOrientation(LinearLayout.VERTICAL);
         root.addView(accList);
         EditText an = field(root, "اسم للحساب (أي اسم)", InputType.TYPE_CLASS_TEXT);
+        nameBox = an;
+        Button web = new Button(this);
+        web.setAllCaps(false);
+        web.setText("🌐 تسجيل الدخول عبر صفحة التك توك (الأفضل)");
+        web.setTextColor(Color.WHITE);
+        web.setBackgroundColor(MainActivity.ACC);
+        web.setOnClickListener(v -> {
+            if (!TikCrypto.ready()) { toast("التطبيق ده اتبنى من غير مفتاح التشفير. حدّثه بالأمر الجديد."); return; }
+            if (an.getText().toString().trim().isEmpty()) { toast("اكتب اسم للحساب الأول"); return; }
+            startActivityForResult(new Intent(this, TikLoginActivity.class), 31);
+        });
+        root.addView(web, new LinearLayout.LayoutParams(-1, dp(46)));
+        TextView or = new TextView(this);
+        or.setText("أو بيانات الدخول (ممكن التك توك يطلب تحقق من السيرفر):");
+        or.setTextColor(MainActivity.DIM);
+        or.setTextSize(12);
+        or.setPadding(0, dp(8), 0, 0);
+        root.addView(or);
         EditText au = field(root, "اسم المستخدم أو الإيميل", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
         EditText ap = field(root, "كلمة السر", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
         Button add = new Button(this);
@@ -162,14 +211,6 @@ public class TikTokActivity extends Activity {
         CheckBox keep = box("احتفظ بنسخة zip في «التنزيلات» (لو قفلتها، الفيديوهات بتفضل جوه التطبيق بس)", "tt_keep", true);
         root.addView(on);
         root.addView(keep);
-
-        caption = new EditText(this);
-        caption.setHint("وصف الفيديو (اختياري)");
-        caption.setHintTextColor(MainActivity.DIM);
-        caption.setTextColor(MainActivity.TXT);
-        caption.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
-        caption.setText(sp.getString("tt_caption", ""));
-        root.addView(caption);
 
         info = new TextView(this);
         info.setTextColor(MainActivity.DIM);

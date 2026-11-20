@@ -26,6 +26,7 @@
             android:screenOrientation="portrait" />
         <activity android:name=".TikTokActivity" android:exported="false"
             android:screenOrientation="portrait" />
+        <activity android:name=".TikLoginActivity" android:exported="false" />
         <provider android:name=".VideoProvider" android:authorities="com.reelsmaker.app.videos"
             android:exported="false" android:grantUriPermissions="true" />
         <service android:name=".JobService" android:exported="false"

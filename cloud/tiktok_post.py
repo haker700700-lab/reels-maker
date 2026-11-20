@@ -43,6 +43,15 @@ def accounts():
     out = []
     for it in items:
         try:
+            if "k" in it:   # جلسة (كوكيز) من تسجيل الدخول جوه التطبيق — تشفير هجين
+                from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+                raw = base64.b64decode(it["k"])
+                kl = key.key_size // 8
+                aes = key.decrypt(raw[:kl], oaep)
+                data = json.loads(AESGCM(aes).decrypt(raw[kl:kl + 12], raw[kl + 12:], None).decode("utf-8"))
+                name = re.sub(r"[^A-Za-z0-9_-]", "", str(it.get("n", ""))) or f"acc{len(out) + 1}"
+                out.append({"name": name, "cookies": data["cookies"]})
+                continue
             user, pw = key.decrypt(base64.b64decode(it["e"]), oaep).decode("utf-8").split("\n", 1)
             name = re.sub(r"[^A-Za-z0-9_-]", "", str(it.get("n", ""))) or f"acc{len(out) + 1}"
             out.append({"name": name, "user": user, "pass": pw})
@@ -69,7 +78,7 @@ def check_block(page):
     if page.locator(sel).count() > 0 or any(
         w in txt for w in ("drag the slider", "verify it's you", "verification code", "enter the code", "too many attempts")
     ):
-        raise Blocked("التك توك طلب تحقق (كابتشا/كود). افتح الحساب مرة من موبايلك ووافق على الدخول ثم جرّب تاني")
+        raise Blocked("التك توك طلب تحقق (كابتشا/كود). استخدم زر «تسجيل الدخول عبر صفحة التك توك» في التطبيق")
 
 
 def find(page, selector):
@@ -80,10 +89,44 @@ def find(page, selector):
     return None
 
 
-def ensure_login(page, acc):
+def diag(page):
+    """وصف مختصر لحالة الصفحة (بدون أي بيانات حساسة) عشان نعرف سبب الفشل."""
+    bits = []
+    try:
+        bits.append("صفحة: " + page.url.split("?")[0].replace("https://www.tiktok.com", "")[:60])
+        msgs = page.locator('[role="alert"], [class*="rror"], [data-e2e*="error"]').all_inner_texts()
+        msgs = [m.strip().replace("\n", " ")[:90] for m in msgs if m.strip()]
+        if msgs:
+            bits.append("رسالة التك توك: " + " | ".join(msgs[:2]))
+        else:
+            body = page.inner_text("body", timeout=3000).replace("\n", " ")
+            bits.append("نص الصفحة: " + body[:110])
+    except Exception:
+        pass
+    return " — ".join(bits)
+
+
+def has_upload(page):
     page.goto(UPLOAD, wait_until="domcontentloaded")
     page.wait_for_timeout(6000)
-    if "login" not in page.url and find(page, 'input[type="file"]'):
+    return "login" not in page.url and find(page, 'input[type="file"]') is not None
+
+
+def ensure_login(page, acc):
+    ctx = page.context
+    if acc.get("cookies"):
+        cks = []
+        for part in acc["cookies"].split("; "):
+            if "=" in part:
+                k, v = part.split("=", 1)
+                cks.append({"name": k, "value": v, "domain": ".tiktok.com", "path": "/", "secure": True})
+        ctx.add_cookies(cks)
+        if has_upload(page):
+            return "cookies"
+        check_block(page)
+        shot(page, f"{acc['name']}_cookies")
+        raise Blocked("الجلسة مش مقبولة (انتهت أو التك توك رفضها). سجّل الدخول من التطبيق تاني. " + diag(page))
+    if has_upload(page):
         return "session"
     page.goto(LOGIN, wait_until="domcontentloaded")
     page.wait_for_timeout(3000)
@@ -91,18 +134,17 @@ def ensure_login(page, acc):
     pw = page.locator('input[type="password"]')
     if user.count() == 0 or pw.count() == 0:
         shot(page, f"{acc['name']}_login_form")
-        raise Blocked("صفحة الدخول مختلفة عن المتوقع")
+        raise Blocked("صفحة الدخول مختلفة عن المتوقع. " + diag(page))
     user.first.fill(acc["user"])
     pw.first.fill(acc["pass"])
     page.locator('button[type="submit"], button[data-e2e="login-button"]').first.click()
     page.wait_for_timeout(9000)
     check_block(page)
-    page.goto(UPLOAD, wait_until="domcontentloaded")
-    page.wait_for_timeout(6000)
-    check_block(page)
-    if "login" in page.url or not find(page, 'input[type="file"]'):
+    d_after = diag(page)
+    if not has_upload(page):
+        check_block(page)
         shot(page, f"{acc['name']}_after_login")
-        raise Blocked("الدخول ماتمش (بيانات غلط أو تحقق إضافي)")
+        raise Blocked("الدخول ماتمش. " + d_after)
     return "password"
 
 
@@ -173,7 +215,7 @@ def main():
                 ctx[a["name"]] = (c, pg)
                 log(f"✅ {a['name']}: دخول ({how})")
             except Exception as e:
-                res["notes"].append(f"{a['name']}: {str(e)[:150]}")
+                res["notes"].append(f"{a['name']}: {str(e)[:260]}")
                 log(f"❌ {a['name']}: {e}")
         total = len(vids) * len(ctx)
         first = True
@@ -188,7 +230,7 @@ def main():
                     log(f"✅ {name}: فيديو {i}/{len(vids)}")
                 except Exception as e:
                     res["fail"] += 1
-                    res["notes"].append(f"{name} فيديو {i}: {str(e)[:150]}")
+                    res["notes"].append(f"{name} فيديو {i}: {str(e)[:260]}")
                     log(f"❌ {name} فيديو {i}: {e}")
                     if isinstance(e, Blocked) and "تحقق" in str(e):
                         ctx.pop(name, None)  # وقف الحساب ده
