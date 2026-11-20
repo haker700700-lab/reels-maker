@@ -34,25 +34,86 @@ public class TikTokActivity extends Activity {
     Button next;
     File pending;
     LinearLayout accList;
-    EditText nameBox;
+    Button addBtn;
 
     @Override protected void onActivityResult(int req, int res, Intent data) {
         super.onActivityResult(req, res, data);
         if (req != 31 || res != RESULT_OK || data == null) return;
-        String ck = data.getStringExtra("cookies");
-        String n = nameBox.getText().toString().trim().replaceAll("[^A-Za-z0-9_-]", "");
+        final String ck = data.getStringExtra("cookies");
         if (ck == null || ck.isEmpty()) return;
-        if (n.isEmpty()) n = "acc" + (accounts().length() + 1);
+        addBtn.setEnabled(false);
+        addBtn.setText("بحفظ الحساب...");
+        new Thread(() -> {
+            String disp = fetchUsername(ck);
+            String msg;
+            try {
+                JSONArray cur = accounts();
+                String n = uniqueId(cur);
+                if (disp.isEmpty()) disp = "حساب " + (cur.length() + 1);
+                // لو نفس الحساب متضاف قبل كده، نحدّثه بدل ما يتكرر
+                for (int i = 0; i < cur.length(); i++) {
+                    JSONObject o = cur.optJSONObject(i);
+                    if (o != null && o.optString("d").equals(disp) && o.has("k")) { n = o.optString("n"); break; }
+                }
+                JSONArray out = new JSONArray();
+                for (int i = 0; i < cur.length(); i++) {
+                    JSONObject o = cur.optJSONObject(i);
+                    if (o != null && !o.optString("n").equals(n)) out.put(o);
+                }
+                out.put(new JSONObject().put("n", n).put("d", disp)
+                        .put("k", TikCrypto.encBlob(new JSONObject().put("cookies", ck).toString())));
+                sp.edit().putString("tt_accs", out.toString()).apply();
+                msg = "اتضاف الحساب " + disp + " ✓";
+            } catch (Exception e) {
+                msg = "فشل حفظ الحساب";
+            }
+            final String m = msg;
+            runOnUiThread(() -> {
+                addBtn.setEnabled(true);
+                addBtn.setText("➕ إضافة حساب تيك توك");
+                toast(m);
+                refreshAccs();
+            });
+        }).start();
+    }
+
+    /** اسم داخلي فريد (بيتبعت للسيرفر): acc1, acc2, ... */
+    String uniqueId(JSONArray cur) {
+        int k = cur.length() + 1;
+        while (true) {
+            String n = "acc" + k;
+            boolean used = false;
+            for (int i = 0; i < cur.length(); i++) {
+                JSONObject o = cur.optJSONObject(i);
+                if (o != null && o.optString("n").equals(n)) { used = true; break; }
+            }
+            if (!used) return n;
+            k++;
+        }
+    }
+
+    /** محاولة لجلب اسم المستخدم من الجلسة (لو فشلت بنستخدم «حساب N»). مابيتخزنش فيها أي حاجة. */
+    String fetchUsername(String cookies) {
         try {
-            JSONArray a = accounts(), out = new JSONArray();
-            for (int i = 0; i < a.length(); i++) if (!a.getJSONObject(i).getString("n").equals(n)) out.put(a.getJSONObject(i));
-            out.put(new JSONObject().put("n", n).put("k", TikCrypto.encBlob(new JSONObject().put("cookies", ck).toString())));
-            sp.edit().putString("tt_accs", out.toString()).apply();
-            nameBox.setText("");
-            toast("اتضاف الحساب " + n + " ✓");
-            refreshAccs();
+            java.net.HttpURLConnection c = (java.net.HttpURLConnection)
+                    new java.net.URL("https://www.tiktok.com/passport/web/account/info/?aid=1459").openConnection();
+            c.setConnectTimeout(10000);
+            c.setReadTimeout(10000);
+            c.setRequestProperty("Cookie", cookies);
+            c.setRequestProperty("User-Agent", TikLoginActivity.DESKTOP_UA);
+            if (c.getResponseCode() != 200) return "";
+            StringBuilder sb = new StringBuilder();
+            try (java.io.BufferedReader br = new java.io.BufferedReader(new java.io.InputStreamReader(c.getInputStream(), "UTF-8"))) {
+                String ln;
+                while ((ln = br.readLine()) != null) sb.append(ln);
+            }
+            JSONObject d = new JSONObject(sb.toString()).optJSONObject("data");
+            if (d == null) return "";
+            String u = d.optString("username", "");
+            if (u.isEmpty()) u = d.optString("screen_name", "");
+            return u.length() > 40 ? u.substring(0, 40) : u;
         } catch (Exception e) {
-            toast("فشل حفظ الحساب");
+            return "";
         }
     }
 
@@ -78,15 +139,17 @@ public class TikTokActivity extends Activity {
         JSONArray a = accounts();
         if (a.length() == 0) {
             TextView t = new TextView(this);
-            t.setText("مفيش حسابات لسه.");
+            t.setText("مفيش حسابات لسه. اضغط «إضافة حساب» وسجّل دخول، وكرّرها لأي عدد حسابات.");
             t.setTextColor(MainActivity.DIM);
             accList.addView(t);
         }
         for (int i = 0; i < a.length(); i++) {
-            final String n = a.optJSONObject(i) == null ? "" : a.optJSONObject(i).optString("n");
+            JSONObject ao = a.optJSONObject(i);
+            final String n = ao == null ? "" : ao.optString("n");
+            final String disp = ao == null ? "" : ao.optString("d", n);
             LinearLayout r = new LinearLayout(this);
             TextView t = new TextView(this);
-            t.setText("👤 " + n);
+            t.setText("🎵 " + disp);
             t.setTextColor(MainActivity.TXT);
             Button d = new Button(this);
             d.setText("حذف");
@@ -143,7 +206,7 @@ public class TikTokActivity extends Activity {
 
 
         TextView ha = new TextView(this);
-        ha.setText("حسابات التك توك (كلمة السر بتتشفّر قبل الحفظ، والتطبيق نفسه مش بيقدر يقراها تاني)");
+        ha.setText("حسابات التك توك (الجلسة بتتشفّر قبل الحفظ، والتطبيق نفسه مش بيقدر يقراها تاني)");
         ha.setTextColor(MainActivity.ACC2);
         ha.setTextSize(13);
         ha.setPadding(0, dp(12), 0, dp(4));
@@ -151,21 +214,18 @@ public class TikTokActivity extends Activity {
         accList = new LinearLayout(this);
         accList.setOrientation(LinearLayout.VERTICAL);
         root.addView(accList);
-        EditText an = field(root, "اسم للحساب (أي اسم)", InputType.TYPE_CLASS_TEXT);
-        nameBox = an;
-        Button web = new Button(this);
-        web.setAllCaps(false);
-        web.setText("🌐 تسجيل الدخول عبر صفحة التك توك (الأفضل)");
-        web.setTextColor(Color.WHITE);
-        web.setBackgroundColor(MainActivity.ACC);
-        web.setOnClickListener(v -> {
+        addBtn = new Button(this);
+        addBtn.setAllCaps(false);
+        addBtn.setText("➕ إضافة حساب تيك توك");
+        addBtn.setTextColor(Color.WHITE);
+        addBtn.setBackgroundColor(MainActivity.ACC);
+        addBtn.setOnClickListener(v -> {
             if (!TikCrypto.ready()) { toast("التطبيق ده اتبنى من غير مفتاح التشفير. حدّثه بالأمر الجديد."); return; }
-            if (an.getText().toString().trim().isEmpty()) { toast("اكتب اسم للحساب الأول"); return; }
             startActivityForResult(new Intent(this, TikLoginActivity.class), 31);
         });
-        root.addView(web, new LinearLayout.LayoutParams(-1, dp(46)));
+        root.addView(addBtn, new LinearLayout.LayoutParams(-1, dp(46)));
         TextView or = new TextView(this);
-        or.setText("أو بيانات الدخول (ممكن التك توك يطلب تحقق من السيرفر):");
+        or.setText("بديل: بيانات الدخول (ممكن التك توك يطلب تحقق من السيرفر):");
         or.setTextColor(MainActivity.DIM);
         or.setTextSize(12);
         or.setPadding(0, dp(8), 0, 0);
@@ -178,19 +238,18 @@ public class TikTokActivity extends Activity {
         add.setTextColor(Color.WHITE);
         add.setBackgroundColor(MainActivity.ACC2);
         add.setOnClickListener(v -> {
-            String n = an.getText().toString().trim().replaceAll("[^A-Za-z0-9_-]", "");
             String u = au.getText().toString().trim(), p = ap.getText().toString();
-            if (n.isEmpty()) n = "acc" + (accounts().length() + 1);
+            String n = uniqueId(accounts());
             if (u.isEmpty() || p.isEmpty()) { toast("اكتب اسم المستخدم وكلمة السر"); return; }
             if (!TikCrypto.ready()) { toast("التطبيق ده اتبنى من غير مفتاح التشفير. حدّثه بالأمر الجديد."); return; }
             try {
                 JSONArray a = accounts();
                 JSONArray out = new JSONArray();
                 for (int i = 0; i < a.length(); i++) if (!a.getJSONObject(i).getString("n").equals(n)) out.put(a.getJSONObject(i));
-                out.put(new JSONObject().put("n", n).put("e", TikCrypto.enc(u, p)));
+                out.put(new JSONObject().put("n", n).put("d", u).put("e", TikCrypto.enc(u, p)));
                 sp.edit().putString("tt_accs", out.toString()).apply();
-                an.setText(""); au.setText(""); ap.setText("");
-                toast("اتضاف الحساب " + n);
+                au.setText(""); ap.setText("");
+                toast("اتضاف الحساب " + u);
                 refreshAccs();
             } catch (IllegalArgumentException e) {
                 toast("البيانات طويلة أوي");
