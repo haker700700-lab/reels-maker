@@ -299,10 +299,16 @@ public class JobService extends Service {
         }
     }
 
-    /** تقرير النشر على التك توك اللي السيرفر سجّله. */
+    /** تقرير النشر (تك توك و/أو فيسبوك) اللي السيرفر سجّله. */
     String ttResult(String job) {
+        boolean tt = sp.getBoolean("job_tt", true), fb = sp.getBoolean("job_fb", false);
+        if (tt && fb) return "🎵 " + report("tt-", job) + "\n📘 " + report("fb-", job);
+        return report(fb ? "fb-" : "tt-", job);
+    }
+
+    String report(String prefix, String job) {
         try {
-            String[] x = Gh.http("GET", Gh.API + "/repos/" + Gh.REPO + "/releases/tags/tt-" + job, null);
+            String[] x = Gh.http("GET", Gh.API + "/repos/" + Gh.REPO + "/releases/tags/" + prefix + job, null);
             if ("200".equals(x[0])) {
                 String b = new JSONObject(x[1]).optString("body", "").trim();
                 if (!b.isEmpty()) return b.length() > 500 ? b.substring(0, 500) : b;

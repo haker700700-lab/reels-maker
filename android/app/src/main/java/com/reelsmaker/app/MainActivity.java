@@ -239,11 +239,16 @@ public class MainActivity extends Activity {
         fl.topMargin = dp(4);
         root.addView(feats, fl);
 
-        Button tt = pill("🎵 النشر على التك توك", false);
+        LinearLayout pubRow = new LinearLayout(this);
+        Button tt = pill("🎵 تيك توك", false);
         tt.setOnClickListener(v -> startActivity(new Intent(this, TikTokActivity.class)));
+        Button fb = pill("📘 فيسبوك", false);
+        fb.setOnClickListener(v -> startActivity(new Intent(this, FbActivity.class)));
+        pubRow.addView(tt, lp(0, dp(42), 1, 2));
+        pubRow.addView(fb, lp(0, dp(42), 1, 2));
         LinearLayout.LayoutParams tl = lp(-1, dp(42), 0, 0);
         tl.topMargin = dp(4);
-        root.addView(tt, tl);
+        root.addView(pubRow, tl);
 
         go = new Button(this);
         go.setText("ابدأ الآن ☁️");
@@ -419,12 +424,22 @@ public class MainActivity extends Activity {
             in.put("tiktok", String.valueOf(ttOn));
             in.put("accs", ttOn ? sp.getString("tt_accs", "[]") : "[]");
             in.put("caption", sp.getString("tt_caption", ""));
+            boolean fbOn = sp.getBoolean("fb_server", false);
+            if (fbOn && sp.getString("fb_accs", "[]").length() < 5) {
+                status.setText("فعّلت النشر على فيسبوك بس مفيش صفحات. أضفها من «📘 فيسبوك».");
+                return;
+            }
+            in.put("fb", String.valueOf(fbOn));
+            in.put("fb_accs", fbOn ? sp.getString("fb_accs", "[]") : "[]");
+            in.put("fb_caption", sp.getString("fb_caption", ""));
             body = new JSONObject().put("ref", "main").put("inputs", in).toString();
         } catch (Exception e) { status.setText("خطأ في الإعدادات."); return; }
 
         // كل حالة العملية بتتحفظ، فالخدمة تكمّل لو اتقتلت أو الجهاز اتعاد تشغيله
+        final boolean ttS = sp.getBoolean("tt_server", false), fbS = sp.getBoolean("fb_server", false);
         sp.edit().putString("job", job).putString("body", body).putString("stage", "NEW")
-                .putBoolean("job_nodl", sp.getBoolean("tt_server", false) && sp.getBoolean("tt_nodl", false))
+                .putBoolean("job_nodl", (ttS || fbS) && (!ttS || sp.getBoolean("tt_nodl", false)) && (!fbS || sp.getBoolean("fb_nodl", false)))
+                .putBoolean("job_tt", ttS).putBoolean("job_fb", fbS)
                 .putBoolean("posted", false).putLong("t0", System.currentTimeMillis())
                 .putString("msg", "ببعت الطلب للسيرفر...").putInt("pct", 0).apply();
         link.setText("");   // الرابط الجاي جديد؛ باقي الإعدادات زي ما هي
