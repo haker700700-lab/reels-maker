@@ -4,18 +4,29 @@
 - بعد أول دخول بتتحفظ الجلسة (كوكيز) في كاش المستودع، فالدخول بالباسورد بيحصل نادرًا.
 - لو التك توك طلب كابتشا/تحقق/كود 2FA: بنقف عند الحساب ده ونسجّل السبب. مش بنحاول نتخطّاه.
 ملاحظة: واجهة التك توك بتتغيّر، ولو أي عنصر اتغيّر هتلاقي السبب في التقرير."""
-import glob, json, os, re, sys, time
+import base64, glob, hashlib, io, json, os, re, sys, tarfile, time
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
 STATE = Path(os.environ.get("TT_STATE_DIR", "tt_state"))
 SHOTS = Path("tt_shots")
+# نفس User-Agent اللي اتسجّل بيه الدخول في التطبيق (TikLoginActivity.DESKTOP_UA) + نفس المنطقة الزمنية، عشان الجلسة تبان من نفس "الجهاز"
+UA = os.environ.get("TT_UA", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+TZ = os.environ.get("TT_TZ", "Africa/Cairo")
+LOCALE = os.environ.get("TT_LOCALE", "en-US")      # en-US أو ar-EG — الأزرار والنصوص بتتعرّف بالاتنين
 UPLOAD = "https://www.tiktok.com/tiktokstudio/upload"
+# سلسلة بدائل للرفع (بالترتيب): لو الأولى فشلت قبل ما نضغط «نشر» بنجرّب اللي بعدها. بتتغيّر بـ TT_UPLOAD_URLS (مفصولة بمسافة).
+UPLOAD_URLS = os.environ.get("TT_UPLOAD_URLS", "").split() or [
+    "https://www.tiktok.com/tiktokstudio/upload?from=webapp",
+    "https://www.tiktok.com/creator-center/upload?from=upload",
+    "https://www.tiktok.com/upload?lang=en",
+]
 LOGIN = "https://www.tiktok.com/login/phone-or-email/email"
 GAP = int(os.environ.get("TT_GAP", "45"))          # ثواني بين كل نشرتين
 CAPTION = os.environ.get("TT_CAPTION", "").strip()
 DIR = os.environ.get("TT_DIR", "")
+STATE_ENC = Path(os.environ.get("TT_STATE_ENC", "tt_state.enc"))   # الجلسة بتتحفظ في الكاش مشفّرة (المستودع ممكن يكون عام)
 STATE.mkdir(exist_ok=True)
 SHOTS.mkdir(exist_ok=True)
 
@@ -26,6 +37,42 @@ class Blocked(Exception):
 
 def log(m):
     print(m, flush=True)
+
+
+def _fernet():
+    from cryptography.fernet import Fernet
+    return Fernet(base64.urlsafe_b64encode(hashlib.sha256(os.environ["TT_PRIV"].encode()).digest()))
+
+
+def restore_state():
+    """بيفك تشفير الجلسة المحفوظة من التشغيلة اللي فاتت (لو موجودة وبنفس المفتاح)."""
+    try:
+        if STATE_ENC.exists():
+            raw = _fernet().decrypt(STATE_ENC.read_bytes())
+            with tarfile.open(fileobj=io.BytesIO(raw), mode="r:gz") as t:
+                for m in t.getmembers():
+                    if m.isfile() and "/" not in m.name and ".." not in m.name:
+                        t.extract(m, STATE)
+            log("♻️ رجّعت جلسات التك توك المحفوظة")
+    except Exception:
+        log("⚠️ ماقدرتش أرجّع الجلسات المحفوظة (هنبدأ بالكوكيز الجديدة)")
+
+
+def save_state():
+    """بيشفّر الجلسات ويحفظها في ملف واحد للكاش، ويمسح النسخة الصريحة."""
+    try:
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w:gz") as t:
+            for f in STATE.glob("*.json"):
+                t.add(f, arcname=f.name)
+        STATE_ENC.write_bytes(_fernet().encrypt(buf.getvalue()))
+    except Exception:
+        log("⚠️ ماقدرتش أحفظ الجلسات")
+    for f in STATE.glob("*.json"):
+        try:
+            f.unlink()
+        except Exception:
+            pass
 
 
 def accounts():
@@ -42,6 +89,8 @@ def accounts():
     oaep = padding.OAEP(mgf=padding.MGF1(hashes.SHA1()), algorithm=hashes.SHA1(), label=None)
     out = []
     for it in items:
+        if it.get("t") == "api":      # حسابات التوكن بيتولّاها tiktok_api.py
+            continue
         try:
             if "k" in it:   # جلسة (كوكيز) من تسجيل الدخول جوه التطبيق — تشفير هجين
                 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -75,14 +124,38 @@ def check_block(page):
     except Exception:
         txt = ""
     sel = "#captcha_container, .captcha-verify-container, [class*='captcha'], iframe[src*='captcha']"
-    if page.locator(sel).count() > 0 or any(
-        w in txt for w in ("drag the slider", "verify it's you", "verification code", "enter the code", "too many attempts")
-    ):
-        raise Blocked("التك توك طلب تحقق (كابتشا/كود). استخدم زر «تسجيل الدخول عبر صفحة التك توك» في التطبيق")
+    if page.locator(sel).count() > 0 or any(w in txt for w in BLOCK_WORDS):
+        raise Blocked("التك توك طلب تحقق (كابتشا/كود). سجّل الدخول تاني من زر «تسجيل الدخول عبر صفحة التك توك» في التطبيق")
 
 
 
-POPUP_BTNS = ("Got it", "Not now", "Maybe later", "Skip", "Dismiss")
+# كل النصوص هنا عربي + إنجليزي (واجهة الاستوديو بتتغيّر حسب لغة الحساب). الأزرار الأساسية بنعتمد عليها بـ data-e2e (مش بالنص).
+POPUP_BTNS = ("Got it", "Not now", "Maybe later", "Skip", "Dismiss", "Close", "OK",
+              "حسنًا", "حسناً", "حسنا", "فهمت", "فهمت ذلك", "موافق", "ليس الآن", "ليس الان", "لاحقًا", "لاحقاً", "لاحقا",
+              "تخطي", "تخطّي", "تجاهل", "إغلاق", "اغلاق", "إغلاق")
+POST_CONFIRM = ("Post now", "Post", "Continue", "Publish anyway",
+                "انشر الآن", "نشر الآن", "انشر الان", "نشر", "انشر", "متابعة", "استمرار", "تابع", "المتابعة")
+DONE_LABELS = ("Manage your posts", "Upload another video", "View profile",
+               "إدارة منشوراتك", "إدارة المنشورات", "ادارة المنشورات", "تحميل فيديو آخر", "رفع فيديو آخر",
+               "تحميل فيديو اخر", "رفع فيديو اخر", "عرض الملف الشخصي", "عرض الحساب")
+BLOCK_WORDS = ("drag the slider", "verify it's you", "verification code", "enter the code", "too many attempts",
+               "اسحب", "رمز التحقق", "أدخل الرمز", "ادخل الرمز", "التحقق من هويتك", "تحقق من أنك", "محاولات كثيرة", "عدد كبير جدًا من المحاولات", "حل الأحجية", "أكمل الأحجية")
+EMPTY_RX = re.compile(r"no (content|posts|videos)|haven.t (posted|uploaded)|nothing (here|yet)|no results|"
+                      r"لا (يوجد|توجد) (محتوى|منشورات|فيديوهات)|لم (تنشر|تقم بنشر|تقم برفع)|لا شيء|لا نتائج", re.I)
+
+
+def btn_by_labels(root, labels, role="button"):
+    """بيرجّع أول زر ظاهر اسمه واحد من الأسماء (مطابقة كاملة بعد تنضيف المسافات، بغض النظر عن حالة الحروف)."""
+    rx = re.compile(r"^\s*(" + "|".join(re.escape(x) for x in labels) + r")\s*$", re.I)
+    loc = root.get_by_role(role, name=rx)
+    try:
+        for i in range(loc.count()):
+            if loc.nth(i).is_visible():
+                return loc.nth(i)
+    except Exception:
+        pass
+    return None
+
 EDITOR_SELS = ('div[contenteditable="true"]', 'div[contenteditable="plaintext-only"]',
                '.public-DraftEditor-content', '[data-e2e="caption-editor"] [contenteditable]')
 NOTES = []
@@ -91,14 +164,13 @@ NOTES = []
 def dismiss_popups(page):
     """يقفل أي نافذة منبثقة (شرح/تنبيه) بتغطّي خانة الوصف. مابنوافقش على أي تفعيل."""
     for fr in page.frames:
-        for label in POPUP_BTNS:
-            try:
-                b = fr.get_by_role("button", name=label, exact=True)
-                if b.count() > 0 and b.first.is_visible():
-                    b.first.click(timeout=2000)
-                    page.wait_for_timeout(500)
-            except Exception:
-                pass
+        try:
+            b = btn_by_labels(fr, POPUP_BTNS)
+            if b is not None:
+                b.click(timeout=2000)
+                page.wait_for_timeout(500)
+        except Exception:
+            pass
 
 
 def visible_editor(page, wait_s=25):
@@ -196,10 +268,17 @@ def diag(page):
     return " — ".join(bits)
 
 
-def has_upload(page):
-    page.goto(UPLOAD, wait_until="domcontentloaded")
-    page.wait_for_timeout(6000)
-    return "login" not in page.url and find(page, 'input[type="file"]') is not None
+def has_upload(page, urls=None):
+    """الجلسة شغّالة لو أي صفحة رفع من السلسلة اتفتحت وفيها خانة الملف."""
+    for u in (urls or UPLOAD_URLS):
+        try:
+            page.goto(u, wait_until="domcontentloaded")
+            page.wait_for_timeout(6000)
+            if "login" not in page.url and find(page, 'input[type="file"]') is not None:
+                return True
+        except Exception:
+            pass
+    return False
 
 
 def ensure_login(page, acc):
@@ -238,8 +317,45 @@ def ensure_login(page, acc):
     return "password"
 
 
-def post_one(page, video, caption, tag):
-    page.goto(UPLOAD, wait_until="domcontentloaded")
+def watch_posts(page):
+    """بيسجّل ردود طلبات POST الخاصة بالنشر عشان نعرف الفشل الصريح (حتى لو الواجهة ما أظهرتوش)."""
+    seen = []
+
+    def on_resp(r):
+        try:
+            if r.request.method != "POST" or "tiktok" not in r.url:
+                return
+            path = r.url.split("?")[0].split("tiktok.com")[-1]
+            if not re.search(r"post|publish|create|submit", path, re.I) or re.search(r"log|report|monitor|collect|stat|event", path, re.I):
+                return
+            item = {"path": path[:70], "status": r.status, "code": None, "msg": ""}
+            try:
+                j = r.json()
+                if isinstance(j, dict):
+                    c = j.get("status_code", j.get("statusCode", j.get("code")))
+                    item["code"] = c
+                    item["msg"] = str(j.get("status_msg") or j.get("message") or j.get("msg") or "")[:90]
+            except Exception:
+                pass
+            seen.append(item)
+        except Exception:
+            pass
+
+    page.on("response", on_resp)
+    return seen
+
+
+def post_failed(seen):
+    """أول رد فيه خطأ صريح (HTTP >= 400 أو كود غير صفري)."""
+    for it in seen:
+        if it["status"] >= 400 or (it["code"] not in (None, 0, "0", 200, "200", "ok")):
+            return f"التك توك رفض النشر ({it['path']} HTTP {it['status']} كود {it['code']}) {it['msg']}".strip()
+    return ""
+
+
+def post_one(page, video, caption, tag, url=UPLOAD, state=None):
+    state = state if state is not None else {}
+    page.goto(url, wait_until="domcontentloaded")
     page.wait_for_timeout(5000)
     check_block(page)
     fi = find(page, 'input[type="file"]')
@@ -261,13 +377,19 @@ def post_one(page, video, caption, tag):
     if caption:
         fill_caption(page, caption, tag)
     page.wait_for_timeout(2000)
+    seen = watch_posts(page)
+    state["clicked"] = True      # من هنا ممكن النشر يكون حصل: ممنوع نجرّب بديل (عشان ماننشرش مرتين)
     click_post(page, tag)
     page.wait_for_timeout(2500)
-    for label in ("Post now", "Post", "Continue"):  # نافذة تأكيد لو ظهرت
-        d = page.get_by_role("button", name=label, exact=True)
-        if d.count() > 0 and d.first.is_visible():
-            d.first.click()
+    for _ in range(3):  # نافذة تأكيد لو ظهرت (عربي/إنجليزي) — ممكن يظهروا ورا بعض
+        d = btn_by_labels(page, POST_CONFIRM)
+        if d is None:
             break
+        try:
+            d.click(timeout=5000)
+        except Exception:
+            break
+        page.wait_for_timeout(2500)
     # نجاح حقيقي = اتحوّلنا لصفحة المحتوى، أو ظهرت نافذة التأكيد بأزرارها (مش مجرد نص "uploaded" على صفحة الرفع)
     confirmed = False
     for _ in range(40):
@@ -276,24 +398,44 @@ def post_one(page, video, caption, tag):
         if "tiktokstudio/content" in page.url:
             confirmed = True
             break
-        done_btn = False
-        for label in ("Manage your posts", "Upload another video", "View profile"):
-            b = page.get_by_role("button", name=label)
-            l = page.get_by_role("link", name=label)
-            if (b.count() > 0 and b.first.is_visible()) or (l.count() > 0 and l.first.is_visible()):
-                done_btn = True
-        if done_btn:
+        if btn_by_labels(page, DONE_LABELS) is not None or btn_by_labels(page, DONE_LABELS, "link") is not None:
             confirmed = True
             break
+    bad = post_failed(seen)
+    if bad:
+        state["clicked"] = False     # رفض صريح من التك توك = ماتنشرش، فآمن نجرّب بديل
+        shot(page, f"{tag}_post")
+        raise Blocked(bad)
     if not confirmed:
         shot(page, f"{tag}_post")
-        raise Blocked("ماقدرتش أتأكد إن النشر تم. " + diag(page))
-    verify_posted(page, tag)
+        raise Blocked("ماقدرتش أتأكد إن النشر تم. " + diag(page) + (f" — ردود: {seen[:2]}" if seen else ""))
+    verify_posted(page, tag, caption)
 
 
-def verify_posted(page, tag):
+def post_with_fallback(page, video, caption, tag):
+    """بيجرّب صفحات الرفع بالترتيب. بيتحوّل للبديل بس لو الفشل حصل قبل الضغط على «نشر» (أو رفض صريح)،
+    وبيقف فورًا عند الكابتشا/التحقق، وعند أي غموض بعد الضغط (عشان مانكرّرش النشر)."""
+    errs = []
+    for k, url in enumerate(UPLOAD_URLS):
+        state = {"clicked": False}
+        try:
+            post_one(page, video, caption, tag, url, state)
+            if k:
+                NOTES.append(f"{tag}: اترفع عن طريق الصفحة البديلة رقم {k + 1}")
+            return
+        except Exception as e:
+            msg = str(e)
+            if state["clicked"] or (isinstance(e, Blocked) and "تحقق" in msg):
+                raise
+            errs.append(f"[{k + 1}] {msg[:110]}")
+            log(f"↪️ {tag}: صفحة الرفع {k + 1} فشلت ({msg[:80]}) — بجرّب اللي بعدها")
+            shot(page, f"{tag}_try{k + 1}")
+    raise Blocked("كل صفحات الرفع فشلت: " + " | ".join(errs))
+
+
+def verify_posted(page, tag, caption=""):
     """يفتح صفحة المحتوى ويتأكد إن فيه فيديوهات فعلاً، ويسجّل حالة الصفحة في التقرير عشان نشوف اللي حصل."""
-    empty = re.compile(r"no (content|posts|videos)|haven.t (posted|uploaded)|nothing (here|yet)|no results", re.I)
+    empty = EMPTY_RX
     txt = ""
     for _ in range(3):
         page.goto("https://www.tiktok.com/tiktokstudio/content", wait_until="domcontentloaded")
@@ -308,6 +450,9 @@ def verify_posted(page, tag):
     NOTES.append(f"{tag} حالة المحتوى: " + txt[:150])
     if not txt or empty.search(txt):
         raise Blocked("اتضغط نشر بس الفيديو مش ظاهر في صفحة المحتوى. " + diag(page))
+    cap = re.sub(r"[#@]\S+", "", caption).strip()[:12]
+    if cap and cap not in txt:
+        NOTES.append(f"{tag}: صفحة المحتوى مافيهاش بداية الوصف (ممكن لسه بيتعالج أو الوصف اتقصّ) — اتأكد من الحساب")
 
 
 def main():
@@ -318,13 +463,14 @@ def main():
         res["notes"].append("مفيش فيديوهات أو مفيش حسابات متضافة")
         write(res, len(vids), len(accs))
         return
+    restore_state()
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         ctx = {}
         for a in accs:
             sf = STATE / f"{a['name']}.json"
             try:
-                c = browser.new_context(locale="en-US", viewport={"width": 1280, "height": 900},
+                c = browser.new_context(locale=LOCALE, timezone_id=TZ, user_agent=UA, viewport={"width": 1280, "height": 900},
                                         storage_state=str(sf) if sf.exists() else None)
                 pg = c.new_page()
                 how = ensure_login(pg, a)
@@ -342,7 +488,7 @@ def main():
                     time.sleep(GAP)
                 first = False
                 try:
-                    post_one(pg, v, CAPTION, f"{name}_{i}")
+                    post_with_fallback(pg, v, CAPTION, f"{name}_{i}")
                     res["ok"] += 1
                     log(f"✅ {name}: فيديو {i}/{len(vids)}")
                 except Exception as e:
@@ -357,6 +503,7 @@ def main():
                 except Exception:
                     pass
         browser.close()
+    save_state()
     res["notes"].extend(NOTES)
     write(res, len(vids), len(accs))
 
@@ -366,7 +513,7 @@ def write(res, nv, na):
     if res["fail"]:
         line += f" — فشل {res['fail']}"
     body = line + ("\n" + "\n".join(res["notes"][:8]) if res["notes"] else "")
-    Path("tt_result.txt").write_text(body, encoding="utf-8")
+    Path(os.environ.get("TT_RESULT", "tt_result.txt")).write_text(body, encoding="utf-8")
     log(body)
 
 

@@ -299,11 +299,14 @@ public class JobService extends Service {
         }
     }
 
-    /** تقرير النشر (تك توك و/أو فيسبوك) اللي السيرفر سجّله. */
+    /** تقرير النشر (تك توك و/أو فيسبوك و/أو إنستجرام) اللي السيرفر سجّله. */
     String ttResult(String job) {
-        boolean tt = sp.getBoolean("job_tt", true), fb = sp.getBoolean("job_fb", false);
-        if (tt && fb) return "🎵 " + report("tt-", job) + "\n📘 " + report("fb-", job);
-        return report(fb ? "fb-" : "tt-", job);
+        boolean tt = sp.getBoolean("job_tt", true), fb = sp.getBoolean("job_fb", false), ig = sp.getBoolean("job_ig", false);
+        StringBuilder sb = new StringBuilder();
+        if (tt) sb.append("🎵 ").append(report("tt-", job));
+        if (fb) sb.append(sb.length() > 0 ? "\n" : "").append("📘 ").append(report("fb-", job));
+        if (ig) sb.append(sb.length() > 0 ? "\n" : "").append("📷 ").append(report("ig-", job));
+        return sb.length() > 0 ? sb.toString() : report("tt-", job);
     }
 
     String report(String prefix, String job) {

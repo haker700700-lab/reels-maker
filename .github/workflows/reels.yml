@@ -78,6 +78,16 @@ on:
       fb_accs:
         description: "صفحات الفيسبوك (مشفّرة، بيملاها التطبيق)"
         default: "[]"
+      ig:
+        description: "نشر على حسابات إنستجرام بعد الانتهاء (من السيرفر)"
+        type: boolean
+        default: false
+      ig_caption:
+        description: "وصف الريل على إنستجرام (اختياري)"
+        default: ""
+      ig_accs:
+        description: "حسابات إنستجرام (مشفّرة، بيملاها التطبيق)"
+        default: "[]"
 
 permissions:
   contents: write
@@ -214,7 +224,7 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: نشر على التك توك
+      - name: نشر على التك توك (حسابات التوكن — API الرسمي)
         id: tt
         if: inputs.tiktok == true
         continue-on-error: true
@@ -224,9 +234,46 @@ jobs:
           TT_PRIV: ${{ secrets.TT_PRIV }}
           TT_CAPTION: ${{ inputs.caption }}
           TT_DIR: ${{ steps.reuse.outputs.hit == 'true' && steps.reuse.outputs.dir || steps.run.outputs.dir }}
+          TT_RESULT: tt_result_api.txt
         run: |
           python -m pip install -q --disable-pip-version-check requests cryptography
-          python cloud/tiktok_api.py
+          if grep -q '"t": *"api"' <<< "$TT_ACCS"; then python cloud/tiktok_api.py; else echo "مفيش حسابات توكن"; fi
+
+      # الجلسة بتتحفظ بين التشغيلات (كاش المستودع الخاص) فالتك توك يشوف نفس الجلسة كل مرة
+      - name: استرجاع جلسة التك توك المحفوظة
+        if: inputs.tiktok == true
+        uses: actions/cache/restore@v4
+        with:
+          path: tt_state.enc
+          key: tt-state-${{ github.run_id }}
+          restore-keys: tt-state-
+
+      - name: نشر على التك توك (حسابات الكوكيز)
+        id: ttck
+        if: inputs.tiktok == true
+        continue-on-error: true
+        timeout-minutes: 40
+        env:
+          TT_ACCS: ${{ inputs.accs }}
+          TT_PRIV: ${{ secrets.TT_PRIV }}
+          TT_CAPTION: ${{ inputs.caption }}
+          TT_DIR: ${{ steps.reuse.outputs.hit == 'true' && steps.reuse.outputs.dir || steps.run.outputs.dir }}
+          TT_RESULT: tt_result_ck.txt
+        run: |
+          if grep -q '"t": *"ck"' <<< "$TT_ACCS"; then
+            python -m pip install -q --disable-pip-version-check requests cryptography playwright
+            python -m playwright install --with-deps chromium
+            python cloud/tiktok_post.py
+          else
+            echo "مفيش حسابات كوكيز"
+          fi
+
+      - name: حفظ جلسة التك توك
+        if: always() && inputs.tiktok == true && hashFiles('tt_state.enc') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: tt_state.enc
+          key: tt-state-${{ github.run_id }}
 
       - name: تقرير النشر (بيظهر في التطبيق)
         if: always() && inputs.tiktok == true
@@ -235,7 +282,8 @@ jobs:
           JOB: ${{ inputs.job }}
         run: |
           [[ "$JOB" =~ ^[a-z0-9]{6,32}$ ]] || exit 0
-          msg=$(cat tt_result.txt 2>/dev/null || echo "النشر على التك توك ماتمش (راجع سجل التشغيل)")
+          msg=$(cat tt_result_api.txt tt_result_ck.txt 2>/dev/null || true)
+          [ -n "$msg" ] || msg="النشر على التك توك ماتمش (راجع سجل التشغيل)"
           gh release create "tt-$JOB" --title "tt" --notes "$msg" || true
           gh release list --limit 100 --json tagName --jq '.[].tagName' | grep '^tt-' | tail -n +21 | \
             while read -r t; do gh release delete "$t" --cleanup-tag -y || true; done
@@ -270,4 +318,36 @@ jobs:
           msg=$(cat fb_result.txt 2>/dev/null || echo "النشر على فيسبوك ماتمش (راجع سجل التشغيل)")
           gh release create "fb-$JOB" --title "fb" --notes "$msg" || true
           gh release list --limit 100 --json tagName --jq '.[].tagName' | grep '^fb-' | tail -n +21 | \
+            while read -r t; do gh release delete "$t" --cleanup-tag -y || true; done
+
+      # ───────── النشر على حسابات إنستجرام من السيرفر (Instagram Content Publishing API الرسمي) ─────────
+      - uses: actions/setup-python@v5
+        if: inputs.ig == true
+        with:
+          python-version: "3.12"
+
+      - name: نشر على إنستجرام
+        id: ig
+        if: inputs.ig == true
+        continue-on-error: true
+        timeout-minutes: 40
+        env:
+          IG_ACCS: ${{ inputs.ig_accs }}
+          TT_PRIV: ${{ secrets.TT_PRIV }}
+          IG_CAPTION: ${{ inputs.ig_caption }}
+          IG_DIR: ${{ steps.reuse.outputs.hit == 'true' && steps.reuse.outputs.dir || steps.run.outputs.dir }}
+        run: |
+          python -m pip install -q --disable-pip-version-check requests cryptography
+          python cloud/instagram_post.py
+
+      - name: تقرير إنستجرام (بيظهر في التطبيق)
+        if: always() && inputs.ig == true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JOB: ${{ inputs.job }}
+        run: |
+          [[ "$JOB" =~ ^[a-z0-9]{6,32}$ ]] || exit 0
+          msg=$(cat ig_result.txt 2>/dev/null || echo "النشر على إنستجرام ماتمش (راجع سجل التشغيل)")
+          gh release create "ig-$JOB" --title "ig" --notes "$msg" || true
+          gh release list --limit 100 --json tagName --jq '.[].tagName' | grep '^ig-' | tail -n +21 | \
             while read -r t; do gh release delete "$t" --cleanup-tag -y || true; done

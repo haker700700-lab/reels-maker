@@ -53,13 +53,49 @@ public class TikTokActivity extends Activity {
             JSONArray a = accounts(), out = new JSONArray();
             for (int i = 0; i < a.length(); i++) {
                 JSONObject o = a.optJSONObject(i);
-                if (o != null && "api".equals(o.optString("t"))) out.put(o);
+                if (o != null && ("api".equals(o.optString("t")) || "ck".equals(o.optString("t")))) out.put(o);
             }
             if (out.length() != a.length()) {
                 sp.edit().putString("tt_accs", out.toString()).apply();
                 Toast.makeText(this, "اتشالت الحسابات القديمة (تسجيل الدخول). أضفها بالتوكن.", Toast.LENGTH_LONG).show();
             }
         } catch (Exception ignored) { }
+    }
+
+    static final int REQ_LOGIN = 77;
+
+    void openLogin() {
+        if (!TikCrypto.ready()) { toast("التطبيق ده اتبنى من غير مفتاح التشفير. حدّثه بالأمر الجديد."); return; }
+        startActivityForResult(new Intent(this, TikLoginActivity.class), REQ_LOGIN);
+    }
+
+    @Override protected void onActivityResult(int req, int res, Intent data) {
+        super.onActivityResult(req, res, data);
+        if (req != REQ_LOGIN || res != RESULT_OK || data == null) return;
+        String ck = data.getStringExtra("cookies");
+        if (ck == null || ck.isEmpty()) return;
+        final String nm = nameBox.getText().toString().trim().replaceAll("[^A-Za-z0-9_-]", "");
+        final String cookies = ck;
+        new Thread(() -> {
+            String msg;
+            try {
+                String disp = "";
+                String n = !nm.isEmpty() ? nm : "c" + Integer.toHexString(cookies.hashCode() & 0xffffff);
+                JSONObject blob = new JSONObject().put("cookies", cookies);
+                JSONArray cur = accounts(), out = new JSONArray();
+                for (int i = 0; i < cur.length(); i++) {
+                    JSONObject o = cur.optJSONObject(i);
+                    if (o != null && !o.optString("n").equals(n)) out.put(o);
+                }
+                out.put(new JSONObject().put("n", n).put("d", n + " (كوكيز)").put("t", "ck").put("k", TikCrypto.encBlob(blob.toString())));
+                sp.edit().putString("tt_accs", out.toString()).apply();
+                msg = "اتضاف الحساب " + n + " بالكوكيز ✓";
+            } catch (Exception e) {
+                msg = "فشل حفظ الحساب: " + e.getClass().getSimpleName();
+            }
+            final String m = msg;
+            runOnUiThread(() -> { toast(m); refreshAccs(); nameBox.setText(""); });
+        }).start();
     }
 
     void toast(String m) { Toast.makeText(this, m, Toast.LENGTH_LONG).show(); }
@@ -276,7 +312,7 @@ public class TikTokActivity extends Activity {
 
 
         TextView ha = new TextView(this);
-        ha.setText("حسابات التك توك (التوكن بيتشفّر قبل الحفظ، والتطبيق نفسه مش بيقدر يقراه تاني)");
+        ha.setText("حسابات التك توك (الكوكيز/التوكن بيتشفّروا قبل الحفظ، والتطبيق نفسه مش بيقدر يقراهم تاني)");
         ha.setTextColor(MainActivity.ACC2);
         ha.setTextSize(13);
         ha.setPadding(0, dp(12), 0, dp(4));
@@ -286,6 +322,23 @@ public class TikTokActivity extends Activity {
         root.addView(accList);
 
         nameBox = field(root, "اسم للحساب (اختياري)", InputType.TYPE_CLASS_TEXT);
+
+        Button lg = new Button(this);
+        lg.setAllCaps(false);
+        lg.setText("🍪 تسجيل الدخول عبر صفحة التك توك (كوكيز)");
+        lg.setTextColor(Color.WHITE);
+        lg.setBackgroundColor(MainActivity.ACC);
+        lg.setOnClickListener(v -> openLogin());
+        LinearLayout.LayoutParams ll = new LinearLayout.LayoutParams(-1, dp(46));
+        ll.topMargin = dp(6);
+        root.addView(lg, ll);
+
+        TextView or = new TextView(this);
+        or.setText("— أو بالتوكن (API الرسمي) —");
+        or.setTextColor(MainActivity.DIM);
+        or.setGravity(Gravity.CENTER);
+        or.setPadding(0, dp(10), 0, dp(2));
+        root.addView(or);
         keyBox = field(root, "Client key (من تطبيقك في TikTok for Developers)", InputType.TYPE_CLASS_TEXT);
         keyBox.setText(sp.getString("tt_ckey", ""));
         secretBox = field(root, "Client secret (مش بيتحفظ في التطبيق)", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);

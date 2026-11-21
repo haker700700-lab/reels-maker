@@ -44,7 +44,7 @@ public class MainActivity extends Activity {
     SharedPreferences sp;
     EditText link, count, minL, maxL, text, musicUrl;
     String resv = Feat.F_RES, mvolv = Feat.F_MVOL;
-    Button q720, q1080, go, last, battery, feats, mvStd, mvMid, mvHigh, pickMusic;
+    Button qBtn, mvBtn, go, last, battery, feats, pickMusic, ttBtn, fbBtn, igBtn;
     CheckBox reverse, music, rights, rsong, react;
     static final int REQ_MUSIC = 21;
     TextView status;
@@ -127,16 +127,28 @@ public class MainActivity extends Activity {
 
     void setRes(String r) {
         resv = "720".equals(r) ? "720" : "1080";
-        q720.setBackground(shape("720".equals(resv) ? ACC : CARD, 12));
-        q1080.setBackground(shape("1080".equals(resv) ? ACC : CARD, 12));
+        qBtn.setText("1080".equals(resv) ? "1080 · عالية" : "720 · أسرع");
     }
 
-    /** مستوى صوت الموسيقى: 8 = قياسية • 15 = وسط • 25 = عالية. */
+    /** مستوى صوت الموسيقى: 8 = قياسية • 15 = وسط • 25 = عالية (زر واحد بيلف عليهم). */
     void setMvol(String v) {
         mvolv = "15".equals(v) ? "15" : "25".equals(v) ? "25" : "8";
-        mvStd.setBackground(shape("8".equals(mvolv) ? ACC : CARD, 12));
-        mvMid.setBackground(shape("15".equals(mvolv) ? ACC : CARD, 12));
-        mvHigh.setBackground(shape("25".equals(mvolv) ? ACC : CARD, 12));
+        mvBtn.setText("🔊 " + ("15".equals(mvolv) ? "وسط" : "25".equals(mvolv) ? "عالية" : "قياسية"));
+    }
+
+    LinearLayout.LayoutParams rowLp(int h) {
+        LinearLayout.LayoutParams l = lp(-1, h, 0, 0);
+        l.topMargin = dp(4);
+        return l;
+    }
+
+    Button tiny(String s) {
+        Button b = pill(s, false);
+        b.setTextSize(12);
+        b.setSingleLine(true);
+        b.setEllipsize(TextUtils.TruncateAt.END);
+        b.setPadding(dp(2), 0, dp(2), 0);
+        return b;
     }
 
     /** بيحمّل القيم (الحالية، وإلا الافتراضي المحفوظ، وإلا الأصلي) في الخانات. */
@@ -184,26 +196,19 @@ public class MainActivity extends Activity {
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(BG);
         root.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
-        root.setPadding(dp(16), dp(12), dp(16), dp(10));
+        root.setPadding(dp(14), dp(8), dp(14), dp(8));
 
         TextView title = new TextView(this);
         title.setText("🎬 صانع الريلز");
-        title.setTextSize(22);
+        title.setTextSize(20);
         title.setTextColor(TXT);
         title.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
         title.setGravity(Gravity.CENTER);
         root.addView(title);
-        TextView sub = new TextView(this);
-        sub.setText("الصق الرابط — والشغل كله على السيرفر");
-        sub.setTextSize(11);
-        sub.setTextColor(DIM);
-        sub.setGravity(Gravity.CENTER);
-        sub.setSingleLine(true);
-        root.addView(sub);
 
-        label(root, "🔗 رابط الفيديو");
         LinearLayout lr = new LinearLayout(this);
-        link = box("https://...", "", InputType.TYPE_TEXT_VARIATION_URI);
+        link = box("🔗 الصق رابط الفيديو هنا — https://...", "", InputType.TYPE_TEXT_VARIATION_URI);
+        link.setTextSize(13);
         Button paste = pill("لصق", true);
         paste.setOnClickListener(v -> {
             ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
@@ -212,109 +217,81 @@ public class MainActivity extends Activity {
                 if (t != null) link.setText(t.toString().trim());
             }
         });
-        lr.addView(link, lp(0, dp(44), 1, 0));
-        lr.addView(paste, lp(dp(64), dp(44), 0, 0));
-        root.addView(lr);
+        lr.addView(link, lp(0, dp(42), 1, 0));
+        lr.addView(paste, lp(dp(60), dp(42), 0, 0));
+        root.addView(lr, rowLp(-2));
 
+        // عدد + أقل + أقصى + الجودة: كلهم في صف واحد (الأسماء في الخانات نفسها)
         LinearLayout nr = new LinearLayout(this);
-        String[] lbls = {"عدد الريلز", "أقل مدة (ث)", "أقصى مدة (ث)"};
+        String[] hints = {"عدد", "أقل (ث)", "أقصى (ث)"};
         EditText[] es = new EditText[3];
         for (int i = 0; i < 3; i++) {
-            LinearLayout c = new LinearLayout(this);
-            c.setOrientation(LinearLayout.VERTICAL);
-            es[i] = field(c, lbls[i], "", InputType.TYPE_CLASS_NUMBER);
+            es[i] = box(hints[i], "", InputType.TYPE_CLASS_NUMBER);
             es[i].setGravity(Gravity.CENTER);
-            nr.addView(c, lp(0, -2, 1, 3));
+            es[i].setTextSize(13);
+            nr.addView(es[i], lp(0, dp(40), 1, 2));
         }
         count = es[0];
         minL = es[1];
         maxL = es[2];
-        root.addView(nr);
+        qBtn = tiny("1080 · عالية");
+        qBtn.setBackground(shape(ACC, 12));
+        qBtn.setOnClickListener(v -> setRes("1080".equals(resv) ? "720" : "1080"));
+        nr.addView(qBtn, lp(0, dp(40), 1.3f, 2));
+        root.addView(nr, rowLp(-2));
 
-        LinearLayout qr = new LinearLayout(this);
-        qr.setGravity(Gravity.CENTER_VERTICAL);
-        TextView ql = new TextView(this);
-        ql.setText("الجودة");
-        ql.setTextSize(12);
-        ql.setTextColor(DIM);
-        ql.setPadding(dp(4), 0, dp(8), 0);
-        qr.addView(ql);
-        q1080 = pill("1080 · عالية", true);
-        q720 = pill("720 · أسرع", false);
-        q1080.setOnClickListener(v -> setRes("1080"));
-        q720.setOnClickListener(v -> setRes("720"));
-        qr.addView(q1080, lp(0, dp(38), 1, 3));
-        qr.addView(q720, lp(0, dp(38), 1, 3));
-        LinearLayout.LayoutParams qlp = lp(-1, -2, 0, 0);
-        qlp.topMargin = dp(6);
-        root.addView(qr, qlp);
+        text = box("النص العربي على الفيديو (سطر واحد)", "", InputType.TYPE_CLASS_TEXT);
+        text.setTextSize(13);
+        root.addView(text, rowLp(dp(40)));
 
-        text = field(root, "النص العربي على الفيديو (سطر واحد)", "", InputType.TYPE_CLASS_TEXT);
-
+        // الخيارات: صفّين من خيارين + الحقوق
         LinearLayout cr = new LinearLayout(this);
         reverse = check(cr, "عكس الفيديو", false);
         music = check(cr, "موسيقى خلفية", false);
         root.addView(cr);
 
-        // مستوى صوت الموسيقى (قياسية / وسط / عالية)
-        LinearLayout vr = new LinearLayout(this);
-        vr.setGravity(Gravity.CENTER_VERTICAL);
-        TextView vl = new TextView(this);
-        vl.setText("صوت الموسيقى");
-        vl.setTextSize(12);
-        vl.setTextColor(DIM);
-        vl.setPadding(dp(4), 0, dp(8), 0);
-        vr.addView(vl);
-        mvStd = pill("قياسية", true);
-        mvMid = pill("وسط", false);
-        mvHigh = pill("عالية", false);
-        mvStd.setOnClickListener(v -> setMvol("8"));
-        mvMid.setOnClickListener(v -> setMvol("15"));
-        mvHigh.setOnClickListener(v -> setMvol("25"));
-        vr.addView(mvStd, lp(0, dp(34), 1, 3));
-        vr.addView(mvMid, lp(0, dp(34), 1, 3));
-        vr.addView(mvHigh, lp(0, dp(34), 1, 3));
-        root.addView(vr);
-
-        // مصدر الموسيقى: رابط أو ملف من الجهاز (فاضي = الموسيقى الهادئة المدمجة)
-        label(root, "🎵 مصدر الموسيقى — رابط أو ملف (فاضي = المدمجة)");
-        LinearLayout mr = new LinearLayout(this);
-        musicUrl = box("https://... رابط موسيقى", "", InputType.TYPE_TEXT_VARIATION_URI);
-        musicUrl.setTextSize(12);
-        pickMusic = pill("📁 رفع", true);
-        pickMusic.setOnClickListener(v -> pickMusicFile());
-        mr.addView(musicUrl, lp(0, dp(40), 1, 0));
-        mr.addView(pickMusic, lp(dp(72), dp(40), 0, 0));
-        root.addView(mr);
-
-        // أغاني الفيديو الأساسية (تلقائي) + وضع الريأكشن
-        rsong = check(root, "🎶 أغاني الفيديو الأساسية (تلقائي)", true);
+        LinearLayout cr2 = new LinearLayout(this);
+        rsong = check(cr2, "🎶 أغاني تلقائي", true);
         rsong.setOnClickListener(v -> toast(rsong.isChecked()
                 ? "لو الفيديو فيه أغنية، الموسيقى الأساسية هتشتغل مكانها تلقائيًا."
                 : "هيفضل صوت الفيديو الأصلي زي ما هو."));
-        react = check(root, "🎭 وضع الريأكشن (تأثيرات تحرير للفيديو)", false);
+        react = check(cr2, "🎭 ريأكشن", false);
         react.setOnClickListener(v -> toast(react.isChecked()
                 ? "تكبير بسيط + لمسة ألوان + سرعة 1.03. وده مش بيضمن تفادي أي مطالبة حقوق."
                 : "وضع الريأكشن اتقفل."));
+        root.addView(cr2);
 
         rights = check(root, "أؤكد أني أملك حقوق الفيديو أو مصرّح لي", false);
 
-        feats = pill("✨ الخصائص والإعدادات", false);
-        feats.setOnClickListener(v -> startActivity(new Intent(this, FeaturesActivity.class)));
-        LinearLayout.LayoutParams fl = lp(-1, dp(42), 0, 0);
-        fl.topMargin = dp(4);
-        root.addView(feats, fl);
+        // الموسيقى في صف واحد: مستوى الصوت (ضغطة بتلف) + رابط/ملف (فاضي = المدمجة)
+        LinearLayout mr = new LinearLayout(this);
+        mvBtn = tiny("🔊 قياسية");
+        mvBtn.setOnClickListener(v -> setMvol("8".equals(mvolv) ? "15" : "15".equals(mvolv) ? "25" : "8"));
+        musicUrl = box("🎵 رابط موسيقى أو ملف (فاضي = المدمجة)", "", InputType.TYPE_TEXT_VARIATION_URI);
+        musicUrl.setTextSize(12);
+        pickMusic = tiny("📁 رفع");
+        pickMusic.setBackground(shape(ACC, 12));
+        pickMusic.setOnClickListener(v -> pickMusicFile());
+        mr.addView(mvBtn, lp(dp(84), dp(40), 0, 2));
+        mr.addView(musicUrl, lp(0, dp(40), 1, 2));
+        mr.addView(pickMusic, lp(dp(64), dp(40), 0, 2));
+        root.addView(mr, rowLp(-2));
 
+        // الخصائص + منصات النشر في صف واحد (✓ = مفعّل للنشر من السيرفر)
         LinearLayout pubRow = new LinearLayout(this);
-        Button tt = pill("🎵 تيك توك", false);
-        tt.setOnClickListener(v -> startActivity(new Intent(this, TikTokActivity.class)));
-        Button fb = pill("📘 فيسبوك", false);
-        fb.setOnClickListener(v -> startActivity(new Intent(this, FbActivity.class)));
-        pubRow.addView(tt, lp(0, dp(42), 1, 2));
-        pubRow.addView(fb, lp(0, dp(42), 1, 2));
-        LinearLayout.LayoutParams tl = lp(-1, dp(42), 0, 0);
-        tl.topMargin = dp(4);
-        root.addView(pubRow, tl);
+        feats = tiny("✨ الخصائص");
+        feats.setOnClickListener(v -> startActivity(new Intent(this, FeaturesActivity.class)));
+        ttBtn = tiny("🎵 تيك توك");
+        ttBtn.setOnClickListener(v -> startActivity(new Intent(this, TikTokActivity.class)));
+        fbBtn = tiny("📘 فيسبوك");
+        fbBtn.setOnClickListener(v -> startActivity(new Intent(this, FbActivity.class)));
+        igBtn = tiny("📷 إنستا");
+        igBtn.setOnClickListener(v -> startActivity(new Intent(this, IgActivity.class)));
+        pubRow.addView(feats, lp(0, dp(42), 1.25f, 2));
+        pubRow.addView(ttBtn, lp(0, dp(42), 1, 2));
+        pubRow.addView(fbBtn, lp(0, dp(42), 1, 2));
+        pubRow.addView(igBtn, lp(0, dp(42), 1, 2));
+        root.addView(pubRow, rowLp(-2));
 
         go = new Button(this);
         go.setText("ابدأ الآن ☁️");
@@ -328,8 +305,8 @@ public class MainActivity extends Activity {
         gd.setCornerRadius(dp(14));
         go.setBackground(gd);
         go.setStateListAnimator(null);
-        LinearLayout.LayoutParams gl = lp(-1, dp(50), 0, 0);
-        gl.topMargin = dp(8);
+        LinearLayout.LayoutParams gl = lp(-1, dp(48), 0, 0);
+        gl.topMargin = dp(6);
         root.addView(go, gl);
 
         bar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
@@ -348,7 +325,7 @@ public class MainActivity extends Activity {
         status.setMaxLines(5);
         status.setEllipsize(TextUtils.TruncateAt.END);
         status.setPadding(0, dp(4), 0, dp(4));
-        status.setText("جاهز. ⏱ الوقت المتوقع من 3 لـ 8 دقايق.");
+        status.setText("جاهز. الصق الرابط والشغل كله على السيرفر ⏱ من 3 لـ 8 دقايق.");
         status.setOnClickListener(v -> {
             CharSequence t = status.getText();
             if (t == null || t.length() == 0) return;
@@ -358,10 +335,10 @@ public class MainActivity extends Activity {
         root.addView(status, stp);
 
         LinearLayout br = new LinearLayout(this);
-        last = pill("⬇️ نزّل آخر ملف جاهز", false);
-        battery = pill("🔋 اسمح بالخلفية", false);
-        br.addView(last, lp(0, dp(40), 1, 2));
-        br.addView(battery, lp(0, dp(40), 1, 2));
+        last = tiny("⬇️ نزّل آخر ملف");
+        battery = tiny("🔋 اسمح بالخلفية");
+        br.addView(last, lp(0, dp(38), 1, 2));
+        br.addView(battery, lp(0, dp(38), 1, 2));
         root.addView(br);
         battery.setOnClickListener(v -> askBattery());
 
@@ -413,7 +390,10 @@ public class MainActivity extends Activity {
         bar.setVisibility(run ? View.VISIBLE : View.INVISIBLE);
         String m = sp.getString("msg", "");
         if (!m.isEmpty()) status.setText(m);
-        feats.setText("✨ الخصائص والإعدادات (" + Feat.enabledCount(sp) + " مفعّلة)");
+        feats.setText("✨ الخصائص (" + Feat.enabledCount(sp) + ")");
+        ttBtn.setText("🎵 تيك توك" + (sp.getBoolean("tt_server", false) ? " ✓" : ""));
+        fbBtn.setText("📘 فيسبوك" + (sp.getBoolean("fb_server", false) ? " ✓" : ""));
+        igBtn.setText("📷 إنستا" + (sp.getBoolean("ig_server", false) ? " ✓" : ""));
         boolean ignoring = true;
         if (Build.VERSION.SDK_INT >= 23) {
             PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
@@ -507,14 +487,22 @@ public class MainActivity extends Activity {
             in.put("fb", String.valueOf(fbOn));
             in.put("fb_accs", fbOn ? sp.getString("fb_accs", "[]") : "[]");
             in.put("fb_caption", sp.getString("fb_caption", ""));
+            boolean igOn = sp.getBoolean("ig_server", false);
+            if (igOn && sp.getString("ig_accs", "[]").length() < 5) {
+                status.setText("فعّلت النشر على إنستجرام بس مفيش حسابات. أضفها من «📷 إنستا».");
+                return;
+            }
+            in.put("ig", String.valueOf(igOn));
+            in.put("ig_accs", igOn ? sp.getString("ig_accs", "[]") : "[]");
+            in.put("ig_caption", sp.getString("ig_caption", ""));
             body = new JSONObject().put("ref", "main").put("inputs", in).toString();
         } catch (Exception e) { status.setText("خطأ في الإعدادات."); return; }
 
         // كل حالة العملية بتتحفظ، فالخدمة تكمّل لو اتقتلت أو الجهاز اتعاد تشغيله
-        final boolean ttS = sp.getBoolean("tt_server", false), fbS = sp.getBoolean("fb_server", false);
+        final boolean ttS = sp.getBoolean("tt_server", false), fbS = sp.getBoolean("fb_server", false), igS = sp.getBoolean("ig_server", false);
         sp.edit().putString("job", job).putString("body", body).putString("stage", "NEW")
-                .putBoolean("job_nodl", (ttS || fbS) && (!ttS || sp.getBoolean("tt_nodl", false)) && (!fbS || sp.getBoolean("fb_nodl", false)))
-                .putBoolean("job_tt", ttS).putBoolean("job_fb", fbS)
+                .putBoolean("job_nodl", (ttS || fbS || igS) && (!ttS || sp.getBoolean("tt_nodl", false)) && (!fbS || sp.getBoolean("fb_nodl", false)) && (!igS || sp.getBoolean("ig_nodl", false)))
+                .putBoolean("job_tt", ttS).putBoolean("job_fb", fbS).putBoolean("job_ig", igS)
                 .putBoolean("posted", false).putLong("t0", System.currentTimeMillis())
                 .putString("msg", "ببعت الطلب للسيرفر...").putInt("pct", 0).apply();
         link.setText("");   // الرابط الجاي جديد؛ باقي الإعدادات زي ما هي

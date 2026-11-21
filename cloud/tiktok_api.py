@@ -50,6 +50,8 @@ def accounts():
     out = []
     for it in items:
         label = str(it.get("d") or it.get("n") or "?")
+        if it.get("t") == "ck":       # حسابات الكوكيز بيتولّاها tiktok_post.py
+            continue
         if it.get("t") != "api":
             log(f"⚠️ الحساب {label}: ده حساب قديم (تسجيل دخول). أضفه تاني بالتوكن من التطبيق.")
             NOTES.append(f"{label}: حساب قديم — أضفه تاني بالتوكن")
@@ -231,7 +233,7 @@ def write(res, nv, na):
     if res["fail"]:
         line += f" — فشل {res['fail']}"
     body = line + ("\n" + "\n".join(res["notes"][:8]) if res["notes"] else "")
-    Path("tt_result.txt").write_text(clean(body), encoding="utf-8")
+    Path(os.environ.get("TT_RESULT", "tt_result.txt")).write_text(clean(body), encoding="utf-8")
     log(body)
 
 
