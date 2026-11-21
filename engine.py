@@ -11,6 +11,12 @@ try:
 except Exception:  # الاختيار الذكي بيتحوّل لتوزيع متساوي لو numpy مش موجود
     np = None
 
+try:
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import fx          # خصائص v5: فلاتر • لوجو • حركة النص • صوت • فيديو تجريبي
+except Exception:
+    fx = None
+
 ROOT = os.path.dirname(os.path.abspath(__file__))
 WORK = os.path.join(ROOT, "work")
 OUT = os.path.join(ROOT, "output")
@@ -1110,6 +1116,11 @@ STYLES = {
     "صندوق أبيض": dict(box=(255, 255, 255, 238), fg=(18, 18, 18, 255), stroke=None),
     "صندوق ذهبي": dict(box=(250, 204, 21, 245), fg=(28, 25, 23, 255), stroke=None),
     "بدون صندوق (حدود وظل)": dict(box=None, fg=(255, 255, 255, 255), stroke=(0, 0, 0, 255)),
+    "ساده (نص بس)": dict(box=None, fg=(255, 255, 255, 255), stroke=None),
+    "صندوق أسود": dict(box=(0, 0, 0, 235), fg=(255, 255, 255, 255), stroke=None),
+    "صندوق بنفسجي": dict(box=(124, 92, 255, 235), fg=(255, 255, 255, 255), stroke=None),
+    "نيون سماوي": dict(box=None, fg=(94, 234, 212, 255), stroke=(8, 47, 73, 255)),
+    "أصفر بحدود": dict(box=None, fg=(255, 226, 0, 255), stroke=(0, 0, 0, 255)),
 }
 
 
@@ -1143,7 +1154,10 @@ def build_text_overlay(work, W, H, ratio, S, quiet=False):
 
     layout = ImageFont.Layout.RAQM if mode == "raqm" else ImageFont.Layout.BASIC
     style = STYLES.get(S["style"], STYLES["صندوق داكن شفاف"])
-    base_fs = int(W * {"صغير": 0.050, "متوسط": 0.064, "كبير": 0.078}.get(S["font_size"], 0.064))
+    base_fs = int(W * {"صغير": 0.050, "متوسط": 0.064, "كبير": 0.078, "ضخم": 0.095}.get(S["font_size"], 0.064))
+    if S.get("tcolor"):
+        _h = S["tcolor"]
+        style = dict(style, fg=(int(_h[0:2], 16), int(_h[2:4], 16), int(_h[4:6], 16), 255))
     max_box_w = int(W * 0.94)
     pad_x_k, pad_y_k = 0.60, 0.36
     probe_img = ImageDraw.Draw(Image.new("RGBA", (10, 10)))
@@ -1187,8 +1201,13 @@ def build_text_overlay(work, W, H, ratio, S, quiet=False):
         top = int(H * 0.5 - bh / 2)
     else:
         top = int(H * bot_lim - bh)
+    if S.get("ty") is not None:      # مكان مخصّص: النسبة من ارتفاع الشاشة (مركز النص)
+        top = int(H * S["ty"] / 100.0 - bh / 2)
     top = max(8, min(top, H - bh - 8))
     left = (W - bw) // 2
+    if S.get("tx") is not None:      # مكان أفقي مخصّص: النسبة من عرض الشاشة (مركز النص)
+        left = int(W * S["tx"] / 100.0 - bw / 2)
+        left = max(4, min(left, W - bw - 4))
 
     img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     if style["box"]:
@@ -1202,14 +1221,14 @@ def build_text_overlay(work, W, H, ratio, S, quiet=False):
         sh = Image.new("RGBA", (W, H), (0, 0, 0, 0))
         sd = ImageDraw.Draw(sh)
         for i, l in enumerate(lines):
-            sd.text((W / 2, top + pad_y + i * lh + lh / 2 + fs * 0.06), prep(l), font=font, fill=(0, 0, 0, 190),
+            sd.text((left + bw / 2, top + pad_y + i * lh + lh / 2 + fs * 0.06), prep(l), font=font, fill=(0, 0, 0, 190),
                     anchor="mm", **kw(l))
         img = Image.alpha_composite(img, sh.filter(ImageFilter.GaussianBlur(fs * 0.09)))
         d = ImageDraw.Draw(img)
     sw = max(2, fs // 13) if style["stroke"] else 0
     for i, l in enumerate(lines):
         extra = {"stroke_width": sw, "stroke_fill": style["stroke"]} if sw else {}
-        d.text((W / 2, top + pad_y + i * lh + lh / 2), prep(l), font=font, fill=style["fg"], anchor="mm", **kw(l), **extra)
+        d.text((left + bw / 2, top + pad_y + i * lh + lh / 2), prep(l), font=font, fill=style["fg"], anchor="mm", **kw(l), **extra)
     os.makedirs(work, exist_ok=True)
     png = os.path.join(work, "text.png")
     img.save(png)
@@ -1743,11 +1762,17 @@ def detect_song(src, dur):
 def build_cmd(src, start, length, out, P, text_png, music, use_text, use_music, track=None):
     W, H, spd = P["W"], P["H"], P["spd"]
     out_len = length / spd
+    A = P.get("adv") if (fx and P.get("adv")) else None      # خصائص v5 (None = السلوك القديم بالظبط)
+    logo = P.get("logo") if A else None
     inputs = ["-ss", f"{start:.3f}", "-t", f"{length:.3f}", "-i", src]
-    idx, t_idx, m_idx = 1, None, None
+    idx, t_idx, m_idx, l_idx = 1, None, None, None
     if use_text and text_png:
         inputs += ["-loop", "1", "-framerate", "30", "-i", text_png]
         t_idx = idx
+        idx += 1
+    if logo:
+        inputs += ["-loop", "1", "-framerate", "30", "-i", logo]
+        l_idx = idx
         idx += 1
     if use_music and music:
         inputs += ["-stream_loop", "-1", "-i", music]
@@ -1772,24 +1797,70 @@ def build_cmd(src, start, length, out, P, text_png, music, use_text, use_music, 
         crop = f"crop={W}:{H}:x='{xe}':y='(ih-oh)/2'" if xe else f"crop={W}:{H}"
         vf = (f"[0:v]fps=30,scale={W}:{H}:force_original_aspect_ratio=increase:force_divisible_by=2,"
               f"{crop},setsar=1,format=yuv420p{enh}{tail}[v0]")
-    fadef = (f",fade=t=in:st=0:d=0.25,fade=t=out:st={max(0.0, out_len - 0.35):.3f}:d=0.35"
-             if P.get("fade") else "")
-    vf += (f";[v0][{t_idx}:v]overlay=0:0:shortest=1{fadef}[v]" if t_idx is not None
-           else f";[v0]null{fadef}[v]")
+
+    # ---- مراحل v5: تكبير بطيء/إضافات ← فلتر ← لوجو ← نص متحرّك ← شريط تقدّم + تلاشي
+    cur = "v0"
+    if A:
+        pre = []
+        if A.get("zoom_slow"):
+            pre.append(fx.slow_zoom(W, H, out_len, 0.08))
+        ex = fx.extras_chain(A.get("extras") or [])
+        if ex:
+            pre.append(ex)
+        if pre:
+            vf += f";[{cur}]{','.join(pre)}[v1]"
+            cur = "v1"
+        lk = fx.apply_look(cur, "v2", A.get("look", "none"), A.get("look_i", 70))
+        if lk:
+            vf += ";" + lk
+            cur = "v2"
+        if l_idx is not None:
+            vf += ";" + fx.logo_filter(cur, l_idx, "v3", W, H, A.get("logo_pos", "tr"), A.get("logo_size", 18),
+                                       A.get("logo_op", 90), A.get("logo_margin", 4))
+            cur = "v3"
+    post = []
+    if A and A.get("progress"):
+        post.append(fx.progress_bar(W, H, out_len))
+    if P.get("fade"):
+        post.append(f"fade=t=in:st=0:d=0.25,fade=t=out:st={max(0.0, out_len - 0.35):.3f}:d=0.35")
+    postc = ",".join(post)
+    if t_idx is not None:
+        ov, tpre = fx.text_overlay_expr((A or {}).get("text_anim", "none"), H) if A else ("overlay=0:0:shortest=1", "")
+        tref = f"[{t_idx}:v]"
+        if tpre:
+            vf += f";[{t_idx}:v]{tpre}[tt]"
+            tref = "[tt]"
+        vf += f";[{cur}]{tref}{ov}" + (("," + postc) if postc else "") + "[v]"
+    else:
+        vf += f";[{cur}]null" + (("," + postc) if postc else "") + "[v]"
 
     fo = max(0.0, out_len - 0.5)
     fade = f"afade=t=in:d=0.12,afade=t=out:st={fo:.3f}:d=0.5"
     base_a = "aresample=44100,aformat=channel_layouts=stereo"
     at = ",".join(x for x in [f"atempo={spd}" if spd != 1 else "", "areverse" if P["reverse"] else ""] if x)
-    dn = ",highpass=f=70,afftdn=nr=10:nf=-32" if P.get("denoise") else ""
-    a0 = f"[0:a]{base_a}{dn}" + (f",{at}" if at else "")
+    AO = P.get("aopts") if A else None
+    if AO:
+        voice = fx.voice_chain(AO)
+        av = AO.get("a_vol", 100)
+        a0 = f"[0:a]{base_a}" + ("," + voice if voice else "") + (f",volume={av / 100:.2f}" if av != 100 else "") + (f",{at}" if at else "")
+        master = fx.master_chain(AO)
+    else:
+        dn = ",highpass=f=70,afftdn=nr=10:nf=-32" if P.get("denoise") else ""
+        a0 = f"[0:a]{base_a}{dn}" + (f",{at}" if at else "")
+        master = "loudnorm=I=-16:TP=-1.5:LRA=11"
     use_orig = P["use_orig"]
     if use_orig and m_idx is not None:
-        fa = (f"{a0}[a0];[{m_idx}:a]{base_a},volume={P['mvol']}[m];"
-              f"[a0][m]amix=inputs=2:duration=first:dropout_transition=0,volume=2,"
-              f"loudnorm=I=-16:TP=-1.5:LRA=11,aresample=44100,{fade}[a]")
+        if AO and AO.get("a_duck"):     # الموسيقى بتنزل أوتوماتيك لما فيه كلام (Auto-Ducking)
+            fa = (f"{a0},asplit[a0a][a0b];[{m_idx}:a]{base_a},volume={min(1.0, P['mvol'] * 1.8):.3f}[m0];"
+                  f"[m0][a0b]sidechaincompress=threshold=0.03:ratio=10:attack=15:release=350[md];"
+                  f"[a0a][md]amix=inputs=2:duration=first:dropout_transition=0,volume=2,"
+                  f"{master},aresample=44100,{fade}[a]")
+        else:
+            fa = (f"{a0}[a0];[{m_idx}:a]{base_a},volume={P['mvol']}[m];"
+                  f"[a0][m]amix=inputs=2:duration=first:dropout_transition=0,volume=2,"
+                  f"{master},aresample=44100,{fade}[a]")
     elif use_orig:
-        fa = f"{a0},loudnorm=I=-16:TP=-1.5:LRA=11,aresample=44100,{fade}[a]"
+        fa = f"{a0},{master},aresample=44100,{fade}[a]"
     elif m_idx is not None:
         fa = f"[{m_idx}:a]{base_a},volume={P.get('msolo', 0.5)},{fade}[a]"
     else:
@@ -1824,6 +1895,176 @@ def render_clip(cmd, out_len, on_frac):
 # ════════════════════════════════════════════════════════════
 #  الإعدادات
 # ════════════════════════════════════════════════════════════
+
+# ════════════════════════════════════════════════════════════
+#  خصائص v5 (adv): فلاتر • لوجو • نص • صوت • وضع جاهز • فيديو تجريبي
+# ════════════════════════════════════════════════════════════
+def _b(v, d=False):
+    if isinstance(v, bool):
+        return v
+    if v is None or v == "":
+        return d
+    return str(v).strip().lower() in ("1", "true", "yes", "on")
+
+
+def normalize_adv(raw):
+    """بيقبل dict أو نص JSON (من مدخل adv)، وبيرجّع قاموس مضبوط ومحدود القيم. 'touched' = العميل بعت خصائص v5."""
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw) if raw.strip() else {}
+        except Exception:
+            raw = {}
+    if not isinstance(raw, dict):
+        raw = {}
+    g = raw.get
+    A = {"touched": bool(raw)}
+    A["mode"] = str(g("mode", "") or "").strip().lower()
+    if A["mode"] not in ("best", "pro"):
+        A["mode"] = ""
+    A["demo"] = _b(g("demo"))
+    look = str(g("look", "none") or "none").strip().lower()
+    A["look"] = look if (fx and look in fx.LOOKS) else "none"
+    A["look_i"] = to_int(g("look_i", 70), 70, 0, 100)
+    ex = g("extras", [])
+    if isinstance(ex, str):
+        ex = [x for x in re.split(r"[,\s|;]+", ex) if x]
+    A["extras"] = [x for x in (ex or []) if fx and x in fx.EXTRAS]
+    A["logo_url"] = str(g("logo_url", "") or "").strip()
+    pos = str(g("logo_pos", "tr") or "tr")
+    A["logo_pos"] = pos if pos in ("tl", "tr", "bl", "br", "c") else "tr"
+    A["logo_size"] = to_int(g("logo_size", 18), 18, 5, 60)
+    A["logo_op"] = to_int(g("logo_op", 90), 90, 10, 100)
+    A["logo_margin"] = to_int(g("logo_margin", 4), 4, 0, 15)
+    # النص
+    tp = str(g("tpos", "") or "")
+    A["tpos"] = tp if tp in ("أعلى", "وسط", "أسفل") else ""
+    A["tstyle"] = str(g("tstyle", "") or "") if str(g("tstyle", "") or "") in STYLES else ""
+    ts = str(g("tsize", "") or "")
+    A["tsize"] = ts if ts in ("صغير", "متوسط", "كبير", "ضخم") else ""
+    tf = str(g("tfont", "") or "").split(" ")[0]
+    A["tfont"] = tf if tf in [c[0] for c in FONT_CATALOG] else ""
+    tc = str(g("tcolor", "") or "").strip().lstrip("#")
+    A["tcolor"] = tc.upper() if re.fullmatch(r"[0-9a-fA-F]{6}", tc) else ""
+    for k in ("tx", "ty"):
+        try:
+            v = g(k, None)
+            A[k] = None if v in (None, "") else max(5.0, min(95.0, float(v)))
+        except Exception:
+            A[k] = None
+    ta = str(g("text_anim", "none") or "none")
+    A["text_anim"] = ta if (fx and ta in fx.TEXT_ANIMS) else "none"
+    A["progress"] = _b(g("progress"))
+    A["zoom_slow"] = _b(g("zoom_slow"))
+    # الصوت
+    for k in ("a_voice", "a_comp", "a_bass", "a_treble", "a_denoise", "a_duck"):
+        A[k] = _b(g(k))
+    A["a_loud"] = _b(g("a_loud"), True)
+    tg = str(g("a_target", "std") or "std")
+    A["a_target"] = tg if tg in ("quiet", "std", "loud") else "std"
+    A["a_vol"] = to_int(g("a_vol", 100), 100, 0, 200)
+    # الحقوق والمصدر
+    A["credit"] = re.sub(r"\s+", " ", str(g("credit", "") or "")).strip()[:80]
+    A["ledger"] = _b(g("ledger"))
+    # الوضع الجاهز بيشغّل توليفته، واللي تختاره إنت فوقها بيتضاف/بيغلب (فلتر مختار = فلترك، إضافات = اتحاد، إلخ)
+    if fx and A["mode"] in fx.PRESETS:
+        pr = fx.PRESETS[A["mode"]]
+        if A["look"] == "none":
+            A["look"], A["look_i"] = pr["look"], pr["look_i"]
+        A["extras"] = list(dict.fromkeys(list(pr.get("extras", [])) + A["extras"]))
+        for k in ("a_voice", "a_bass", "a_denoise", "progress", "zoom_slow"):
+            A[k] = bool(A[k] or pr.get(k, False))
+        if A["a_target"] == "std":
+            A["a_target"] = pr.get("a_target", "std")
+        if A["text_anim"] == "none":
+            A["text_anim"] = pr.get("text_anim", "none")
+        A["a_duck"] = True
+        A["touched"] = True
+    if A["demo"]:
+        A["touched"] = True
+    return A
+
+
+def fetch_logo(spec, work):
+    """بينزّل/بيقرا اللوجو (رابط أو ملف) ويحوّله PNG شفاف صغير. بيرجّع المسار أو None."""
+    try:
+        from PIL import Image
+        import io
+        spec = spec.strip().strip("\"'")
+        data = None
+        loc = os.path.expanduser(spec[7:] if spec.startswith("file://") else spec)
+        if os.path.isfile(loc):
+            data = open(loc, "rb").read()
+        elif re.match(r"https?://", spec):
+            req = urllib.request.Request(spec, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=30) as r:
+                data = r.read(8 * 1048576 + 1)
+            if len(data) > 8 * 1048576:
+                say("اللوجو أكبر من 8 م.ب — هتجاهله.", "warn")
+                return None
+        if not data:
+            say("مقدرتش أقرا اللوجو — هكمّل من غيره.", "warn")
+            return None
+        im = Image.open(io.BytesIO(data))
+        im.seek(0)
+        im = im.convert("RGBA")
+        im.thumbnail((1024, 1024))
+        os.makedirs(work, exist_ok=True)
+        out = os.path.join(work, "logo.png")
+        im.save(out)
+        say(f"تم تجهيز اللوجو ({im.width}×{im.height}).", "ok")
+        return out
+    except Exception as e:
+        say(f"اللوجو مش صالح ({e.__class__.__name__}) — هكمّل من غيره.", "warn")
+        return None
+
+
+def audio_levels(path, seconds=30):
+    """متوسط/أقصى مستوى صوت الفيديو الأصلي بالديسيبل (للتقرير بس)."""
+    r = run(["ffmpeg", "-hide_banner", "-nostdin", "-t", str(seconds), "-i", path, "-vn", "-af", "volumedetect",
+             "-f", "null", "-"], timeout=60)
+    m1 = re.search(r"mean_volume:\s*(-?[\d.]+) dB", r.stderr or "")
+    m2 = re.search(r"max_volume:\s*(-?[\d.]+) dB", r.stderr or "")
+    return (float(m1.group(1)) if m1 else None, float(m2.group(1)) if m2 else None)
+
+
+def describe_effects(S, A, music_desc, has_audio, logo_ok):
+    """ملخص بالعربي لكل اللي اتطبّق على الفيديو (بيتطبع وبيتحفظ في effects.txt)."""
+    L = []
+    if A.get("mode"):
+        L.append("🏆 الوضع: " + ("الأفضل (Best)" if A["mode"] == "best" else "احترافي (Pro)"))
+    L.append("📐 الشكل: " + ("قص بالطول يملا الشاشة" if S["crop"] else "تلقائي") + (" + تتبّع الوجوه" if S["face"] else ""))
+    if fx and A.get("look", "none") != "none":
+        L.append(f"🎨 الفلتر: {fx.LOOKS[A['look']][0]} — شدة {A['look_i']}%")
+    if S["enhance"]:
+        L.append("✨ تحسين الصورة: تباين + ألوان + حدّة")
+    if fx and A.get("extras"):
+        L.append("🛠️ إضافات الصورة: " + "، ".join(fx.EXTRAS[k][0] for k in A["extras"]))
+    if A.get("zoom_slow"):
+        L.append("🔍 تكبير بطيء متواصل (8%)")
+    if logo_ok:
+        L.append(f"🏷️ لوجو: {fx.LOGO_POS.get(A['logo_pos'], '')} — حجم {A['logo_size']}% — شفافية {A['logo_op']}%")
+    if S["use_text"] and S["text"].strip():
+        L.append(f"📝 النص: {S['pos']} • {S['style']}" + (f" • حركة: {fx.TEXT_ANIMS.get(A.get('text_anim'), '')}" if fx and A.get("text_anim", "none") != "none" else ""))
+    if A.get("credit"):
+        L.append("🔖 سطر المصدر: " + A["credit"])
+    if A.get("progress"):
+        L.append("📊 شريط تقدّم تحت")
+    if S["fade"]:
+        L.append("🎞️ تلاشي ناعم في البداية والنهاية")
+    if has_audio and S["use_orig"]:
+        a = ["توحيد المستوى (" + {"quiet": "-18", "std": "-16", "loud": "-14"}[A.get("a_target", "std")] + " LUFS)" if A.get("a_loud", True) else "بدون توحيد"]
+        for k, n in (("a_denoise", "تنقية دوشة"), ("a_voice", "وضوح الكلام"), ("a_comp", "ضغط ديناميكي"), ("a_bass", "تقوية الباص"), ("a_treble", "تفتيح الحدّة")):
+            if A.get(k) or (k == "a_denoise" and S["denoise"]):
+                a.append(n)
+        if A.get("a_vol", 100) != 100:
+            a.append(f"مستوى الصوت الأصلي {A['a_vol']}%")
+        L.append("🔊 صوت الفيديو: " + "، ".join(a))
+    L.append("🎵 الموسيقى: " + music_desc)
+    if A.get("a_duck") and music_desc != "مفيش":
+        L.append("🎚️ خفض الموسيقى تلقائي وقت الكلام (Ducking)")
+    return L
+
+
 def normalize_settings(raw, need_rights=True):
     g = raw.get
     S = {
@@ -1866,6 +2107,10 @@ def normalize_settings(raw, need_rights=True):
     FT = None
     if fr is not None:
         FT = {t.strip().lower() for t in re.split(r"[,\s|;]+", str(fr)) if t.strip()} - {"none"}
+    A = normalize_adv(g("adv", None))
+    if fx and A["mode"] in fx.PRESETS:      # الوضع الجاهز بيضيف خصائصه على اللي معلّم عليه
+        FT = (FT or set()) | {t for t in fx.PRESETS[A["mode"]]["feat"].split(",") if t}
+    S["adv"] = A
     S["feat"] = FT
     S["crop"] = bool(FT is not None and "crop" in FT)
     S["face"] = bool(FT is not None and "face" in FT)
@@ -1876,6 +2121,19 @@ def normalize_settings(raw, need_rights=True):
         S["enhance"] = "enhance" in FT
         S["use_orig"] = "orig" in FT
         S["pick"] = "ذكي (أحسن اللحظات)" if "best" in FT else "توزيع متساوي"
+    if A["demo"]:
+        S["n"], S["min_l"], S["max_l"] = 1, 3, 10
+        S["pick"] = "توزيع متساوي"
+        S["face"] = False
+    if A["tpos"]:
+        S["pos"] = A["tpos"]
+    if A["tstyle"]:
+        S["style"] = A["tstyle"]
+    if A["tsize"]:
+        S["font_size"] = A["tsize"]
+    if A["tfont"]:
+        S["font_choice"] = A["tfont"]
+    S["tcolor"], S["tx"], S["ty"] = A["tcolor"], A["tx"], A["ty"]
     if S["ratio"] not in ("9:16", "4:5", "1:1"):
         S["ratio"] = "9:16"
     if not (0.5 <= S["spd"] <= 2.0):
@@ -1918,9 +2176,10 @@ def _main(raw):
     T0 = time.time()
     prog = PROG
     S = normalize_settings(raw)
-    if not S["rights"]:
+    demo = bool(S["adv"].get("demo") and fx)
+    if not S["rights"] and not demo:      # الفيديو التجريبي بيتولّد محليًا (مفيهوش محتوى حد)
         raise UserError("علّم على خانة «أؤكد أني أملك حقوق الفيديو» وبعدين ابدأ تاني.")
-    if not S["url"].strip():
+    if not S["url"].strip() and not demo:
         raise UserError("الصق رابط الفيديو أو اختر فيديو من جهازك.")
     if S["max_l"] < S["min_l"]:
         S["min_l"], S["max_l"] = S["max_l"], S["min_l"]
@@ -1955,7 +2214,16 @@ def _main(raw):
     say("1️⃣ تحميل الفيديو...")
     prog.stage(0, 35)
     prog.update("بجهّز التحميل...", force=True, frac=0)
-    src, info, src_temp = fetch_media(S["url"], WORK, "source", opts, prog, need_video=True)
+    if demo:
+        say("1️⃣ بجهّز الفيديو التجريبي (10 ثواني) من غير تحميل...")
+        src = os.path.join(WORK, "demo_source.mp4")
+        rr = run(fx.demo_source_cmd(src, 10), timeout=180)
+        info = probe(src) if os.path.exists(src) else None
+        if rr.returncode != 0 or not info or not info.get("dur"):
+            raise UserError("ماقدرتش أعمل الفيديو التجريبي: " + (rr.stderr or "")[-200:])
+        src_temp = True
+    else:
+        src, info, src_temp = fetch_media(S["url"], WORK, "source", opts, prog, need_video=True)
     dur = info["dur"]
     prog.stage(35, 40)
     say(f"تم التحميل: {os.path.getsize(src)/1048576:.1f} MB — المدة {fmt_t(dur)} — "
@@ -2030,6 +2298,19 @@ def _main(raw):
 
     # ---------- 3) النص ----------
     prog.stage(40, 45)
+    adv = S["adv"]
+    credit_png = None
+    if fx and adv.get("credit"):
+        try:
+            S2 = dict(S, text=adv["credit"], pos="أعلى", font_size="صغير", style="ساده (نص بس)", tx=None, ty=None, tcolor="")
+            cp, _pp, _n = build_text_overlay(WORK, W, H, ratio, S2, quiet=True)
+            if cp:
+                credit_png = os.path.join(WORK, "credit.png")
+                os.replace(cp, credit_png)
+        except Cancelled:
+            raise
+        except Exception:
+            credit_png = None
     text_png = None
     if S["use_text"] and S["text"].strip():
         prog.update("بجهّز النص العربي...", force=True)
@@ -2042,6 +2323,18 @@ def _main(raw):
         except Exception as e:
             say(f"مشكلة في تجهيز النص ({e.__class__.__name__}: {str(e)[:120]}) — هكمّل من غير نص.", "warn")
             text_png = None
+    if credit_png:
+        try:
+            from PIL import Image
+            if text_png:
+                a_ = Image.open(text_png).convert("RGBA")
+                a_.alpha_composite(Image.open(credit_png).convert("RGBA"))
+                a_.save(text_png)
+            else:
+                text_png = credit_png
+        except Exception:
+            pass
+    logo_path = fetch_logo(adv["logo_url"], WORK) if (fx and adv.get("logo_url")) else None
 
     # ---------- 4) الموسيقى ----------
     song_found = False
@@ -2083,11 +2376,37 @@ def _main(raw):
             say(f"الموسيقى: {e} — هكمّل بدون موسيقى.", "warn")
             music = None
 
+    music_desc = "مفيش"
+    if music:
+        if S["music_src"].startswith("رابط") and S["music_url"].strip():
+            music_desc = "موسيقى اخترتها (رابط/ملف مرفوع)"
+        else:
+            music_desc = "الموسيقى الهادئة المدمجة (الافتراضية)"
+        if not (S["music_on"] or song_found):
+            music_desc += " — كملف منفصل بس (مش مدمجة)"
     mix = music if (S["music_on"] or song_found) else None      # الموسيقى اللي بتتدمج جوه الفيديو (لو الزر مفعّل أو الأغنية اتبدّلت)
     P = {"W": W, "H": H, "spd": spd, "fill": fill, "enhance": S["enhance"], "reverse": reverse,
          "use_orig": bool(S["use_orig"] and info["has_audio"] and not song_found), "mvol": S["mvol"] / 100,
          "msolo": S["msolo"], "zoom": 1.06 if S["react"] else 1.0,
          "denoise": S["denoise"] and info["has_audio"], "fade": S["fade"]}
+    if fx and adv.get("touched"):
+        P["adv"] = adv
+        P["logo"] = logo_path
+        P["aopts"] = {"a_denoise": bool(S["denoise"] or adv.get("a_denoise")), "a_voice": adv.get("a_voice"),
+                      "a_comp": adv.get("a_comp"), "a_bass": adv.get("a_bass"), "a_treble": adv.get("a_treble"),
+                      "a_loud": adv.get("a_loud", True), "a_target": adv.get("a_target", "std"),
+                      "a_duck": adv.get("a_duck"), "a_vol": adv.get("a_vol", 100)}
+        P["aopts"]["a_hp"] = bool(P["aopts"]["a_denoise"] or P["aopts"]["a_voice"])
+    # تقرير الصوت + ملخص التأثيرات (بيتحفظ كمان في effects.txt)
+    eff = describe_effects(S, adv if P.get("adv") else {}, music_desc, info["has_audio"], bool(logo_path))
+    if info["has_audio"]:
+        mv, xv = audio_levels(src)
+        if mv is not None:
+            say(f"🔊 الصوت الأصلي: متوسط {mv:.1f} dB، أعلى نقطة {xv:.1f} dB" + (" — واطي، هيتوحّد مستواه" if mv < -26 else ""), "info")
+    else:
+        say("🔊 الفيديو الأصلي مفيهوش صوت.", "info")
+    for ln_ in eff:
+        say(ln_, "info")
     if S["use_orig"] and not info["has_audio"]:
         say("الفيديو الأصلي مفيهوش صوت.", "warn")
 
@@ -2140,6 +2459,14 @@ def _main(raw):
                     lost = [x for x, f in (("النص", text_png and not ut), ("الموسيقى", mix and not um)) if f]
                 break
             last_err = err[-350:]
+        if not done_ok and P.get("adv"):      # لو خصائص v5 عملت مشكلة: نعمل الريل بالأساسيات بدلها
+            Pp = dict(P, adv=None, logo=None, aopts=None)
+            cmd, out_len = build_cmd(src, st, ln, out, Pp, text_png, mix, bool(text_png), bool(mix), track)
+            rc, err = render_clip(cmd, out_len, lambda f: None)
+            if rc == 0 and os.path.exists(out) and os.path.getsize(out) > 10000:
+                done_ok, lost = True, ["الفلاتر/اللوجو/المؤثرات الإضافية"]
+            else:
+                last_err = err[-350:]
         return out, out_len, done_ok, lost, last_err
 
     prog.update(f"بعمل الريلز ({total})...", force=True, frac=0)
@@ -2160,6 +2487,20 @@ def _main(raw):
             say(f"فشل الريل {i+1}: {last_err}", "err")
     if not clips:
         raise UserError("ماتعملش أي ريل. جرّب تلغي «عكس الفيديو» أو تقلّل أقصى مدة أو تختار جودة 720، ولو استمرت المشكلة ابعتلي الرسالة اللي فوق.")
+    if demo and clips:
+        try:
+            before = f"{WORK}/clips/reel_00_before.mp4"
+            Pb = dict(P, adv=None, logo=None, aopts=None, enhance=False, fade=False, denoise=False, zoom=1.0,
+                      use_orig=bool(info["has_audio"]))
+            cmd, ol_ = build_cmd(src, windows[0][0], windows[0][1], before, Pb, None, None, False, False, None)
+            rc_, _e = render_clip(cmd, ol_, lambda f: None)
+            if rc_ == 0 and os.path.exists(before) and os.path.getsize(before) > 5000:
+                clips.insert(0, (before, ol_))
+                say("اتعمل ملف «قبل» (reel_00_before) عشان تقارن بينه وبين النتيجة.", "ok")
+        except Cancelled:
+            raise
+        except Exception:
+            pass
     if src_temp:
         try:
             os.remove(src)
@@ -2189,6 +2530,24 @@ def _main(raw):
         if r.returncode == 0 and os.path.exists(mf):
             extra_files.append(mf)
             say("الموسيقى اتحفظت كملف منفصل: music.m4a (جوه reels.zip).", "ok")
+    try:
+        ef_ = os.path.join(odir, "effects.txt")
+        with open(ef_, "w", encoding="utf-8") as f:
+            f.write("التأثيرات اللي اتطبّقت على الريلز:\n" + "\n".join("• " + x for x in eff) + "\n")
+        extra_files.append(ef_)
+        if fx and (adv.get("ledger") or adv.get("mode")) and not demo:
+            host = urllib.parse.urlparse(extract_url(S["url"]) or "").netloc or "ملف محلي"
+            rl_ = os.path.join(odir, "rights.txt")
+            with open(rl_, "w", encoding="utf-8") as f:
+                f.write("سجل الحقوق (للاحتفاظ بيه)\n"
+                        f"التاريخ: {datetime.datetime.now():%Y-%m-%d %H:%M}\n"
+                        f"مصدر الفيديو (الموقع فقط): {host}\n"
+                        "إقرار صاحب الحساب: أنا مالك الفيديو أو مصرّح لي باستخدامه ونشره.\n"
+                        + (f"سطر المصدر على الفيديو: {adv['credit']}\n" if adv.get("credit") else "")
+                        + "الموسيقى: " + music_desc + "\n")
+            extra_files.append(rl_)
+    except Exception:
+        pass
     try:
         with zipfile.ZipFile(os.path.join(odir, "reels.zip"), "w", zipfile.ZIP_STORED) as z:
             for dst, _ in final:
@@ -2316,6 +2675,20 @@ def selftest():
     except Exception:
         row("requests", False)
     row("OpenCV (تتبّع الوجوه)", faces_available(), "اختياري")
+    row("fx.py (فلاتر/لوجو/صوت v5)", fx is not None, f"{len(fx.LOOKS) - 1} فلتر" if fx else "الملف ناقص")
+    if fx:   # فحص سريع إن ffmpeg بيقبل أهم سلاسل الفلاتر (٣ ثواني فيديو تجريبي)
+        t_ = os.path.join(CACHE, "selftest_demo.mp4")
+        ok_ = run(fx.demo_source_cmd(t_, 3), timeout=60).returncode == 0
+        row("فيديو تجريبي (lavfi)", ok_)
+        if ok_:
+            g_ = "[0:v]scale=180:320,format=yuv420p[v0];" + fx.apply_look("v0", "o", "golden", 60)
+            r_ = run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", t_, "-filter_complex", g_, "-map", "[o]",
+                      "-an", "-t", "1", "-f", "null", "-"], timeout=60)
+            row("الفلاتر (blend/colorbalance)", r_.returncode == 0)
+            r2_ = run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", t_, "-af",
+                       fx.voice_chain({"a_voice": True, "a_denoise": True}) + "," + fx.master_chain({}),
+                       "-vn", "-f", "null", "-"], timeout=60)
+            row("معالجة الصوت (loudnorm/compressor)", r2_.returncode == 0)
     row("node (يوتيوب)", bool(shutil.which("node")), "اختياري")
     try:
         p, mode, _, miss = pick_font("اختبار الخط العربي", "Tajawal")

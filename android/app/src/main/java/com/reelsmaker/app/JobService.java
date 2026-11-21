@@ -312,11 +312,12 @@ public class JobService extends Service {
 
     /** تقرير النشر (تك توك و/أو فيسبوك و/أو إنستجرام) اللي السيرفر سجّله. */
     String ttResult(String job) {
-        boolean tt = sp.getBoolean("job_tt", true), fb = sp.getBoolean("job_fb", false), ig = sp.getBoolean("job_ig", false);
+        boolean tt = sp.getBoolean("job_tt", true), fb = sp.getBoolean("job_fb", false), ig = sp.getBoolean("job_ig", false), xx = sp.getBoolean("job_x", false);
         StringBuilder sb = new StringBuilder();
         if (tt) sb.append("🎵 ").append(report("tt-", job));
         if (fb) sb.append(sb.length() > 0 ? "\n" : "").append("📘 ").append(report("fb-", job));
         if (ig) sb.append(sb.length() > 0 ? "\n" : "").append("📷 ").append(report("ig-", job));
+        if (xx) sb.append(sb.length() > 0 ? "\n" : "").append("𝕏 ").append(report("x-", job));
         return sb.length() > 0 ? sb.toString() : report("tt-", job);
     }
 

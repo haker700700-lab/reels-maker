@@ -30,6 +30,20 @@ S = {
     "feat": env("IN_FEAT").strip() or "crop,best,face,enhance,orig",
     "rights": yes("IN_RIGHTS"),
 }
+# خصائص v5 (فلاتر • لوجو • نص • صوت • وضع جاهز • فيديو تجريبي) كلها في مدخل واحد JSON اسمه adv
+# (GitHub بيسمح بـ 25 مدخل بس). حقول النشر على X جواه (x_on / x_caption / x_accs) بتتشال من هنا قبل ما تتحفظ.
+try:
+    _adv = json.loads(env("IN_ADV", "{}") or "{}")
+    if not isinstance(_adv, dict):
+        _adv = {}
+except Exception:
+    _adv = {}
+for _k in ("x_on", "x_caption", "x_accs"):
+    _adv.pop(_k, None)
+S["adv"] = _adv
+if _adv.get("demo"):
+    S["url"] = S["url"] or "demo"
+    S["rights"] = True
 cookies = env("YT_COOKIES")
 if cookies.strip():
     with open("cookies.txt", "w", encoding="utf-8") as f:
@@ -41,7 +55,7 @@ print("settings ok (الرابط مش بيتطبع عشان المستودع ع�
 
 # بصمة الطلب (الرابط + الإعدادات): نفس الرابط بنفس الإعدادات = نفس الريلز، فمنعيدش الشغل ولا بنكرر حاجة
 key = json.dumps([S["url"], S["n"], S["min_l"], S["max_l"], S["res"], S["reverse"], S["text"], S["music_on"], S["feat"],
-                  S["mvol"], S["music_url"], S["rsong"], S["react"]],
+                  S["mvol"], S["music_url"], S["rsong"], S["react"], S["adv"]],
                  ensure_ascii=False, sort_keys=True)
 digest = hashlib.sha256(key.encode("utf-8")).hexdigest()[:20]
 out = os.environ.get("GITHUB_OUTPUT")

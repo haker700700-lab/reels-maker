@@ -44,7 +44,7 @@ public class MainActivity extends Activity {
     SharedPreferences sp;
     EditText link, count, minL, maxL, text, musicUrl;
     String resv = Feat.F_RES, mvolv = Feat.F_MVOL;
-    Button qBtn, mvBtn, go, last, battery, feats, pickMusic, ttBtn, fbBtn, igBtn;
+    Button qBtn, mvBtn, go, last, battery, feats, pickMusic, ttBtn, fbBtn, igBtn, xBtn, studioBtn;
     CheckBox reverse, music, rights, rsong, react;
     static final int REQ_MUSIC = 21;
     TextView status;
@@ -293,6 +293,16 @@ public class MainActivity extends Activity {
         pubRow.addView(igBtn, lp(0, dp(42), 1, 2));
         root.addView(pubRow, rowLp(-2));
 
+        // الاستوديو (فلاتر • لوجو • نص • صوت • فيديو تجريبي) + النشر على X
+        LinearLayout pubRow2 = new LinearLayout(this);
+        studioBtn = tiny("🎛️ الاستوديو");
+        studioBtn.setOnClickListener(v -> startActivity(new Intent(this, StudioActivity.class)));
+        xBtn = tiny("𝕏 إكس");
+        xBtn.setOnClickListener(v -> startActivity(new Intent(this, XActivity.class)));
+        pubRow2.addView(studioBtn, lp(0, dp(42), 1.25f, 2));
+        pubRow2.addView(xBtn, lp(0, dp(42), 1, 2));
+        root.addView(pubRow2, rowLp(-2));
+
         go = new Button(this);
         go.setText("ابدأ الآن ☁️");
         go.setAllCaps(false);
@@ -365,6 +375,11 @@ public class MainActivity extends Activity {
         super.onResume();
         loadFromPrefs();   // لو رجعت من شاشة الخصائص (حفظ/رجوع للافتراضي/الأصلية)
         sp.registerOnSharedPreferenceChangeListener(listener);
+        if (sp.getBoolean("run_demo", false)) {    // الاستوديو طلب فيديو تجريبي
+            sp.edit().putBoolean("run_demo", false).apply();
+            start(true);
+            return;
+        }
         // لو في عملية شغّالة والخدمة اتقتلت (مثلًا من النظام)، نشغّلها تاني
         if (isRunning() && !JobService.alive) startJobService();
         render();
@@ -394,6 +409,8 @@ public class MainActivity extends Activity {
         ttBtn.setText("🎵 تيك توك" + (sp.getBoolean("tt_server", false) ? " ✓" : ""));
         fbBtn.setText("📘 فيسبوك" + (sp.getBoolean("fb_server", false) ? " ✓" : ""));
         igBtn.setText("📷 إنستا" + (sp.getBoolean("ig_server", false) ? " ✓" : ""));
+        xBtn.setText("𝕏 إكس" + (sp.getBoolean("x_server", false) ? " ✓" : ""));
+        studioBtn.setText("🎛️ الاستوديو (" + ("custom".equals(Feat.str(sp, "a_mode", "best")) ? "مخصّص" : "best".equals(Feat.str(sp, "a_mode", "best")) ? "الأفضل" : "Pro") + ")");
         boolean ignoring = true;
         if (Build.VERSION.SDK_INT >= 23) {
             PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
@@ -441,11 +458,14 @@ public class MainActivity extends Activity {
     }
 
     // ───────── التشغيل ─────────
-    void start() {
+    void start() { start(false); }
+
+    /** demo = فيديو تجريبي ١٠ ثواني بيتولّد على السيرفر (من غير رابط ولا إقرار حقوق، ومن غير نشر على أي منصة). */
+    void start(boolean demo) {
         if (isRunning() || noService()) return;
-        final String url = link.getText().toString().trim();
+        final String url = demo ? "demo" : link.getText().toString().trim();
         if (url.isEmpty()) { status.setText("الصق رابط الفيديو الأول."); return; }
-        if (!rights.isChecked()) { status.setText("علّم على «أؤكد أني أملك حقوق الفيديو»."); return; }
+        if (!demo && !rights.isChecked()) { status.setText("علّم على «أؤكد أني أملك حقوق الفيديو»."); return; }
         int n = num(count, 5, 1, 30), mn = num(minL, 15, 3, 600), mx = num(maxL, 25, 3, 600);
         if (mx < mn) { int t = mn; mn = mx; mx = t; }
         count.setText(String.valueOf(n));
@@ -471,7 +491,7 @@ public class MainActivity extends Activity {
             in.put("rsong", String.valueOf(rsong.isChecked()));
             in.put("react", String.valueOf(react.isChecked()));
             in.put("feat", Feat.string(sp));
-            boolean ttOn = sp.getBoolean("tt_server", false);
+            boolean ttOn = !demo && sp.getBoolean("tt_server", false);
             if (ttOn && sp.getString("tt_accs", "[]").length() < 5) {
                 status.setText("فعّلت النشر على التك توك بس مفيش حسابات. أضفها من «🎵 النشر على التك توك».");
                 return;
@@ -479,7 +499,7 @@ public class MainActivity extends Activity {
             in.put("tiktok", String.valueOf(ttOn));
             in.put("accs", ttOn ? sp.getString("tt_accs", "[]") : "[]");
             in.put("caption", sp.getString("tt_caption", ""));
-            boolean fbOn = sp.getBoolean("fb_server", false);
+            boolean fbOn = !demo && sp.getBoolean("fb_server", false);
             if (fbOn && sp.getString("fb_accs", "[]").length() < 5) {
                 status.setText("فعّلت النشر على فيسبوك بس مفيش صفحات. أضفها من «📘 فيسبوك».");
                 return;
@@ -487,7 +507,7 @@ public class MainActivity extends Activity {
             in.put("fb", String.valueOf(fbOn));
             in.put("fb_accs", fbOn ? sp.getString("fb_accs", "[]") : "[]");
             in.put("fb_caption", sp.getString("fb_caption", ""));
-            boolean igOn = sp.getBoolean("ig_server", false);
+            boolean igOn = !demo && sp.getBoolean("ig_server", false);
             if (igOn && sp.getString("ig_accs", "[]").length() < 5) {
                 status.setText("فعّلت النشر على إنستجرام بس مفيش حسابات. أضفها من «📷 إنستا».");
                 return;
@@ -495,17 +515,23 @@ public class MainActivity extends Activity {
             in.put("ig", String.valueOf(igOn));
             in.put("ig_accs", igOn ? sp.getString("ig_accs", "[]") : "[]");
             in.put("ig_caption", sp.getString("ig_caption", ""));
+            boolean xOn = !demo && sp.getBoolean("x_server", false);
+            if (xOn && sp.getString("x_accs", "[]").length() < 5) {
+                status.setText("فعّلت النشر على X بس مفيش حسابات. أضفها من «𝕏 إكس».");
+                return;
+            }
+            in.put("adv", Feat.adv(sp, demo, xOn));
             body = new JSONObject().put("ref", "main").put("inputs", in).toString();
         } catch (Exception e) { status.setText("خطأ في الإعدادات."); return; }
 
         // كل حالة العملية بتتحفظ، فالخدمة تكمّل لو اتقتلت أو الجهاز اتعاد تشغيله
-        final boolean ttS = sp.getBoolean("tt_server", false), fbS = sp.getBoolean("fb_server", false), igS = sp.getBoolean("ig_server", false);
+        final boolean ttS = !demo && sp.getBoolean("tt_server", false), fbS = !demo && sp.getBoolean("fb_server", false), igS = !demo && sp.getBoolean("ig_server", false), xS = !demo && sp.getBoolean("x_server", false);
         sp.edit().putString("job", job).putString("body", body).putString("stage", "NEW")
-                .putBoolean("job_nodl", (ttS || fbS || igS) && (!ttS || sp.getBoolean("tt_nodl", false)) && (!fbS || sp.getBoolean("fb_nodl", false)) && (!igS || sp.getBoolean("ig_nodl", false)))
-                .putBoolean("job_tt", ttS).putBoolean("job_fb", fbS).putBoolean("job_ig", igS)
+                .putBoolean("job_nodl", (ttS || fbS || igS || xS) && (!ttS || sp.getBoolean("tt_nodl", false)) && (!fbS || sp.getBoolean("fb_nodl", false)) && (!igS || sp.getBoolean("ig_nodl", false)) && (!xS || sp.getBoolean("x_nodl", false)))
+                .putBoolean("job_tt", ttS).putBoolean("job_fb", fbS).putBoolean("job_ig", igS).putBoolean("job_x", xS)
                 .putBoolean("posted", false).putLong("t0", System.currentTimeMillis())
                 .putString("msg", "ببعت الطلب للسيرفر...").putInt("pct", 0).apply();
-        link.setText("");   // الرابط الجاي جديد؛ باقي الإعدادات زي ما هي
+        if (!demo) link.setText("");   // الرابط الجاي جديد؛ باقي الإعدادات زي ما هي
         startJobService();
         render();
     }

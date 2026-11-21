@@ -2,6 +2,8 @@ package com.reelsmaker.app;
 
 import android.content.SharedPreferences;
 
+import org.json.JSONObject;
+
 /** تعريف الخصائص (المربعات) والقيم الافتراضية — مشترك بين الشاشة الرئيسية وشاشة الخصائص. */
 final class Feat {
     // الإعدادات الأصلية (المصنع)
@@ -30,8 +32,84 @@ final class Feat {
             "ملف موسيقى لوحده جنب الريلز"};
     static final boolean[] DEF = {true, true, true, true, true, false, false, false};
 
-    static final String[] STR_KEYS = {"n", "min", "max", "res", "text", "mvol", "murl"};
-    static final String[] BOOL_KEYS = {"rev", "mus", "rsong", "react"};
+    // ───── خصائص v5 (الاستوديو): الوضع • الفلاتر • اللوجو • النص • الصوت ─────
+    // a_mode: best (الأفضل — الافتراضي) / pro / custom (أنا أختار)
+    static final String[] ADV_STR = {"a_mode", "a_look", "a_look_i", "a_extras", "a_logo_url", "a_logo_pos", "a_logo_size",
+            "a_logo_op", "a_tpos", "a_tstyle", "a_tsize", "a_tfont", "a_tcolor", "a_tanim", "a_cred", "a_target", "a_vol"};
+    static final String[] ADV_BOOL = {"a_progress", "a_zoom", "a_voice", "a_comp", "a_bass", "a_treble", "a_duck", "a_loud",
+            "a_denoise", "a_ledger"};
+
+    static final String[] STR_KEYS = cat(new String[]{"n", "min", "max", "res", "text", "mvol", "murl"}, ADV_STR);
+    static final String[] BOOL_KEYS = cat(new String[]{"rev", "mus", "rsong", "react"}, ADV_BOOL);
+
+    static String[] cat(String[] a, String[] b) {
+        String[] o = new String[a.length + b.length];
+        System.arraycopy(a, 0, o, 0, a.length);
+        System.arraycopy(b, 0, o, a.length, b.length);
+        return o;
+    }
+
+    /** القيمة الأصلية لمفتاح من مفاتيح الاستوديو. */
+    static String advDef(String k) {
+        switch (k) {
+            case "a_mode": return "best";
+            case "a_look": return "none";
+            case "a_look_i": return "70";
+            case "a_logo_pos": return "tr";
+            case "a_logo_size": return "18";
+            case "a_logo_op": return "90";
+            case "a_tpos": return "أسفل";
+            case "a_tstyle": return "صندوق داكن شفاف";
+            case "a_tsize": return "متوسط";
+            case "a_tfont": return "Tajawal";
+            case "a_tanim": return "none";
+            case "a_target": return "std";
+            case "a_vol": return "100";
+            default: return "";
+        }
+    }
+
+    static boolean advBoolDef(String k) {
+        return "a_loud".equals(k) || "a_ledger".equals(k);
+    }
+
+    /** JSON مدخل adv اللي بيتبعت للسيرفر (كل خصائص v5 + إعدادات النشر على X). demo = فيديو تجريبي. */
+    static String adv(SharedPreferences sp, boolean demo, boolean xOn) {
+        try {
+            JSONObject o = new JSONObject();
+            String mode = str(sp, "a_mode", advDef("a_mode"));
+            o.put("mode", "custom".equals(mode) ? "" : mode);
+            o.put("look", str(sp, "a_look", advDef("a_look")));
+            o.put("look_i", str(sp, "a_look_i", advDef("a_look_i")));
+            o.put("extras", str(sp, "a_extras", ""));
+            o.put("logo_url", str(sp, "a_logo_url", "").trim());
+            o.put("logo_pos", str(sp, "a_logo_pos", advDef("a_logo_pos")));
+            o.put("logo_size", str(sp, "a_logo_size", advDef("a_logo_size")));
+            o.put("logo_op", str(sp, "a_logo_op", advDef("a_logo_op")));
+            o.put("tpos", str(sp, "a_tpos", advDef("a_tpos")));
+            o.put("tstyle", str(sp, "a_tstyle", advDef("a_tstyle")));
+            o.put("tsize", str(sp, "a_tsize", advDef("a_tsize")));
+            o.put("tfont", str(sp, "a_tfont", advDef("a_tfont")));
+            o.put("tcolor", str(sp, "a_tcolor", ""));
+            o.put("text_anim", str(sp, "a_tanim", advDef("a_tanim")));
+            o.put("credit", str(sp, "a_cred", "").trim());
+            o.put("a_target", str(sp, "a_target", advDef("a_target")));
+            o.put("a_vol", str(sp, "a_vol", advDef("a_vol")));
+            o.put("progress", bool(sp, "a_progress", false));
+            o.put("zoom_slow", bool(sp, "a_zoom", false));
+            for (String k : new String[]{"voice", "comp", "bass", "treble", "duck", "loud", "denoise"}) {
+                o.put("a_" + k, bool(sp, "a_" + k, advBoolDef("a_" + k)));
+            }
+            o.put("ledger", bool(sp, "a_ledger", true));
+            if (demo) o.put("demo", true);
+            o.put("x_on", xOn && !demo);
+            o.put("x_caption", sp.getString("x_caption", ""));
+            o.put("x_accs", xOn && !demo ? sp.getString("x_accs", "[]") : "[]");
+            return o.toString();
+        } catch (Exception e) {
+            return "{}";
+        }
+    }
 
     private Feat() { }
 
