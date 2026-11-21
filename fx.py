@@ -52,6 +52,9 @@ EXTRAS = {
     "clarity": ("وضوح (Clarity)", "unsharp=13:13:0.9:13:13:0.0"),
     "stabilize": ("تثبيت خفيف", "deshake=rx=16:ry=16:edge=mirror"),
     "denoise_v": ("تنظيف الصورة", "hqdn3d=2.5:2:3:3"),
+    "vibrance": ("ألوان نابضة (Vibrance)", "vibrance=intensity=0.55"),
+    "lowlight": ("تفتيح الإضاءة الضعيفة", "eq=gamma=1.12:brightness=0.03"),
+    "softskin": ("نعومة البشرة", "smartblur=lr=1.2:ls=0.6:lt=-2"),
 }
 
 
@@ -85,7 +88,7 @@ def apply_look(label_in, label_out, look, intensity, tag="lk"):
 
 def extras_chain(extras):
     """سلسلة فلاتر الإضافات المختارة (بالترتيب الصح: تنظيف ثم تثبيت ثم حدّة ثم أثر)."""
-    order = ["denoise_v", "stabilize", "clarity", "sharp", "vignette", "grain"]
+    order = ["denoise_v", "stabilize", "lowlight", "softskin", "vibrance", "clarity", "sharp", "vignette", "grain"]
     out = [EXTRAS[k][1] for k in order if k in extras and k in EXTRAS]
     return ",".join(out)
 

@@ -1372,20 +1372,60 @@ def _pick_windows(s, db, hop, dur, n, L, min_l, max_l):
     return out
 
 
-def smart_windows(src, dur, n, L, min_l, max_l):
-    """الاختيار القديم (طاقة الصوت بس) — بنستخدمه كاحتياطي."""
+
+# ════════════════════════════════════════════════════════════
+#  اللقطات المهمة (v6): بنختار بالصورة + مؤثرات الصوت (ضحك/صراخ/ضربة) — مش بالأغاني
+# ════════════════════════════════════════════════════════════
+MOMENT_W = {
+    # نوع اللقطات -> أوزان: حركة • قطعات مشهد • وجوه • مؤثرات صوت • وضوح الصورة
+    "all":     dict(motion=0.30, cut=0.15, face=0.20, audio=0.20, sharp=0.15),
+    "action":  dict(motion=0.50, cut=0.25, face=0.05, audio=0.10, sharp=0.10),
+    "funny":   dict(motion=0.15, cut=0.10, face=0.30, audio=0.35, sharp=0.10),
+    "emotion": dict(motion=0.10, cut=0.05, face=0.50, audio=0.20, sharp=0.15),
+}
+
+
+def _smooth(x, k):
+    k = max(1, int(k))
+    if k == 1 or len(x) < k:
+        return np.asarray(x, dtype=np.float64)
+    pad = np.pad(np.asarray(x, dtype=np.float64), (k // 2, k - 1 - k // 2), mode="edge")
+    return np.convolve(pad, np.ones(k) / k, mode="valid")
+
+
+def audio_moment_score(src, hop=0.25):
+    """بيرجّع (score 0..1, db, music_like 0..1) على شبكة hop، أو None.
+    score عالي = «حدث» صوتي (ضحك/صراخ/ضربة/كلام متقطّع) — الأغاني (طاقة مستمرة من غير وقفات) بتتقيّم واطي عمدًا."""
     if np is None:
         return None
-    hop = 0.25
     e = audio_energy(src, hop)
     if e is None or len(e) < 16:
         return None
     db = 20 * np.log10(e + 1e-5)
-    floor, ceil = float(np.percentile(db, 10)), float(np.percentile(db, 95))
-    if ceil - floor < 3:
+    k = int(8 / hop)                                    # نافذة ٨ ثواني
+    base = _smooth(db, k)
+    burst = np.clip((db - base) / 12.0, 0, 1)           # أعلى فجأة من اللي حواليه
+    dev = np.sqrt(np.maximum(_smooth((db - base) ** 2, k), 0))
+    pause = _smooth((db < base - 10).astype(np.float64), k)
+    music_like = ((dev < 3.5) & (pause < 0.05)).astype(np.float64)
+    music_like = _smooth(music_like, int(4 / hop))
+    speech = np.clip(dev / 8.0, 0, 1) * (1 - music_like)
+    sc = np.clip(0.6 * _smooth(burst, 3) + 0.4 * speech, 0, 1) * (1 - 0.85 * music_like)
+    return sc, db, music_like
+
+
+def smart_windows(src, dur, n, L, min_l, max_l):
+    """احتياطي (لو تحليل الصورة مش متاح): مؤثرات الصوت بس — مش طاقة الأغاني."""
+    if np is None:
         return None
-    s = np.clip((db - floor) / (ceil - floor), 0, 1)
-    return _pick_windows(s, db, hop, dur, n, L, min_l, max_l)
+    hop = 0.25
+    r = audio_moment_score(src, hop)
+    if r is None:
+        return None
+    sc, db, ml = r
+    if float(np.max(sc)) - float(np.min(sc)) < 0.05:
+        return None
+    return _pick_windows(sc, None if float(np.mean(ml)) > 0.6 else db, hop, dur, n, L, min_l, max_l)
 
 
 # ════════════════════════════════════════════════════════════
@@ -1574,37 +1614,42 @@ def visual_scan(src, dur, info, want_faces, max_seconds=120):
             "face": np.array(FC) if det is not None else None}
 
 
-def best_windows(src, dur, n, L, min_l, max_l, info, use_faces=False):
-    """بيختار أحسن اللحظات: حركة + وضوح الصورة + وجود وجوه + نشاط الصوت (من غير ما يفضّل الأغاني لوحدها)."""
+def best_windows(src, dur, n, L, min_l, max_l, info, use_faces=False, moments="all"):
+    """بيختار اللقطات المهمة: حركة/أكشن + قطعات مشهد + وجوه (حب/دراما) + مؤثرات صوت (ضحك/صراخ) + وضوح الصورة.
+    مش بيفضّل الأغاني: طاقة الصوت المستمرة (موسيقى) بتتقيّم واطي. moments = all/action/funny/emotion."""
     if np is None:
         return None
+    W = MOMENT_W.get(moments, MOMENT_W["all"])
     hop = 0.25
     N = int(dur / hop)
     if N < 16:
         return None
     grid = (np.arange(N) + 0.5) * hop
-    parts, db = [], None
+    parts, db, ml_mean = [], None, 0.0
     if info.get("has_audio"):
-        e = audio_energy(src, hop)
-        if e is not None and len(e) >= 16:
-            db_raw = 20 * np.log10(e + 1e-5)
-            fl, ce = float(np.percentile(db_raw, 10)), float(np.percentile(db_raw, 95))
-            if ce - fl >= 3:
-                a = np.clip((db_raw - fl) / (ce - fl), 0, 1)
-                at = (np.arange(len(a)) + 0.5) * hop
-                parts.append((0.30, np.interp(grid, at, a)))
-                db = np.interp(grid, at, db_raw)
+        r = audio_moment_score(src, hop)
+        if r is not None:
+            sc, db_raw, ml = r
+            at = (np.arange(len(sc)) + 0.5) * hop
+            parts.append((W["audio"], np.interp(grid, at, sc)))
+            ml_mean = float(np.mean(ml))
+            db = np.interp(grid, at, db_raw)
     vs = visual_scan(src, dur, info, use_faces)
     if vs is not None:
-        v = (0.6 * _norm01(vs["motion"]) + 0.4 * _norm01(vs["sharp"])) * vs["vis"]
-        parts.append((0.45, np.interp(grid, vs["t"], v)))
+        mo = _norm01(_smooth(vs["motion"], 3))
+        spike = np.clip((vs["motion"] - _smooth(vs["motion"], 9)) / (np.std(vs["motion"]) + 1e-6), 0, 3) / 3.0
+        sh = _norm01(vs["sharp"]) * vs["vis"]
+        parts.append((W["motion"], np.interp(grid, vs["t"], mo * vs["vis"])))
+        parts.append((W["cut"], np.interp(grid, vs["t"], spike)))
+        parts.append((W["sharp"], np.interp(grid, vs["t"], sh)))
         if vs["face"] is not None:
-            parts.append((0.25, np.interp(grid, vs["t"], vs["face"])))
+            parts.append((W["face"], np.interp(grid, vs["t"], _smooth(vs["face"], 3))))
     if not parts:
         return None
     wsum = sum(wt for wt, _ in parts)
     s = np.clip(sum(wt * x for wt, x in parts) / wsum, 0, 1)
-    return _pick_windows(s, db, hop, dur, n, L, min_l, max_l)
+    # لو صوت الفيديو أغنية في الأغلب: مفيش نقط هدوء مفيدة للقص، فنقص عند أقل اهتمام بصري
+    return _pick_windows(s, None if ml_mean > 0.6 else db, hop, dur, n, L, min_l, max_l)
 
 
 # ════════════════════════════════════════════════════════════
@@ -1953,6 +1998,8 @@ def normalize_adv(raw):
             A[k] = None
     ta = str(g("text_anim", "none") or "none")
     A["text_anim"] = ta if (fx and ta in fx.TEXT_ANIMS) else "none"
+    mm = str(g("moments", "all") or "all").strip().lower()
+    A["moments"] = mm if mm in MOMENT_W else "all"
     A["progress"] = _b(g("progress"))
     A["zoom_slow"] = _b(g("zoom_slow"))
     # الصوت
@@ -2267,9 +2314,9 @@ def _main(raw):
         S["face"] = False
     windows = None
     if n >= 1 and dur >= min_l and S["pick"].startswith("ذكي") and (info["has_audio"] or info["has_video"]):
-        prog.update("بحلّل الفيديو (حركة + وجوه + صوت) عشان أختار أحسن اللحظات...", force=True)
+        prog.update("بدوّر على اللقطات المهمة (حركة • وجوه • ضحك وأكشن)...", force=True)
         try:
-            windows = best_windows(src, dur, n, L, min_l, max_l, info, S["face"])
+            windows = best_windows(src, dur, n, L, min_l, max_l, info, S["face"], S["adv"].get("moments", "all"))
         except Cancelled:
             raise
         except Exception as e:
@@ -2283,7 +2330,7 @@ def _main(raw):
             except Exception:
                 windows = None
         if windows:
-            say("تم اختيار أحسن اللحظات (حركة + وضوح + " + ("وجوه + " if S["face"] else "") + "صوت) بدل التوزيع المتساوي.", "ok")
+            say("تم اختيار اللقطات المهمة (حركة + وضوح + " + ("وجوه + " if S["face"] else "") + "مؤثرات صوت — مش الأغاني) بدل التوزيع المتساوي.", "ok")
     if not windows:
         windows = uniform_windows(dur, n, L) if dur >= min_l else [(0.0, dur)]
         say("تم توزيع المقاطع بالتساوي على طول الفيديو.")

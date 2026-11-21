@@ -100,7 +100,7 @@ public class XActivity extends Activity {
             d.setText("حذف");
             d.setAllCaps(false);
             d.setTextColor(Color.WHITE);
-            d.setBackgroundColor(0xFF3A2A4D);
+            d.setBackgroundColor(Ui.DANGER);
             d.setOnClickListener(v -> {
                 save(remove(accounts(), n));
                 refreshAccs();

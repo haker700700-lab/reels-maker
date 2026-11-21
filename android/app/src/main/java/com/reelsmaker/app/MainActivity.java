@@ -8,68 +8,58 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
+import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.PowerManager;
-import android.provider.OpenableColumns;
 import android.provider.Settings;
 import android.text.InputType;
+import android.text.SpannableStringBuilder;
+import android.text.Spanned;
 import android.text.TextUtils;
+import android.text.style.ForegroundColorSpan;
+import android.text.style.StyleSpan;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
-import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
+import android.widget.Switch;
 import android.widget.TextView;
 
 import org.json.JSONObject;
 
-import java.io.ByteArrayOutputStream;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.net.HttpURLConnection;
-import java.net.URLEncoder;
-
 /**
- * صانع الريلز: بتلصق الرابط وبس. الشغل كله على سيرفرات GitHub المجانية،
+ * صانع الريلز (v6): بتلصق الرابط وبس. الشغل كله على سيرفرات GitHub المجانية،
  * ومتابعة العملية والتنزيل بتتم في خدمة خلفية (JobService) بتكمّل حتى لو قفلت الشاشة أو التطبيق أو النت فصل.
- * الصفحة الرئيسية ثابتة على شاشة واحدة (من غير أي تمرير طلوع أو نزول). الخصائص في شاشة مستقلة (FeaturesActivity).
+ * الصفحة الرئيسية ثابتة على شاشة واحدة (من غير تمرير). كل الخصائص (موسيقى • عكس • ريأكشن • اللقطات...) جوه «استوديو برو».
  */
 public class MainActivity extends Activity {
     SharedPreferences sp;
-    EditText link, count, minL, maxL, text, musicUrl;
-    String resv = Feat.F_RES, mvolv = Feat.F_MVOL;
-    Button qBtn, mvBtn, go, last, battery, feats, pickMusic, ttBtn, fbBtn, igBtn, xBtn, studioBtn;
-    CheckBox reverse, music, rights, rsong, react;
-    static final int REQ_MUSIC = 21;
-    TextView status;
+    EditText link, count, minL, maxL, text;
+    String resv = Feat.F_RES;
+    Button qBtn, go, last, battery;
+    Switch rights;
+    TextView status, stSvc, stMode, stFeat, stPub, studioSub;
+    TextView ttSt, fbSt, igSt, xSt;
     ProgressBar bar;
     final SharedPreferences.OnSharedPreferenceChangeListener listener = (p, k) -> runOnUiThread(this::render);
 
-    static final int BG = 0xFF0E1224, CARD = 0xFF1A2040, ACC = 0xFF7C5CFF, ACC2 = 0xFF2DD4BF, TXT = 0xFFF1F3FF, DIM = 0xFF8E95B8;
+    // نفس الألوان القديمة بأسمائها (الشاشات التانية بتستخدمها) — بس بالألوان الهادية الجديدة
+    static final int BG = Ui.BG, CARD = Ui.CARD, ACC = Ui.ACC, ACC2 = Ui.ACC2, TXT = Ui.TXT, DIM = Ui.DIM;
 
-    int dp(int v) { return (int) (v * getResources().getDisplayMetrics().density + 0.5f); }
+    int dp(int v) { return Ui.dp(this, v); }
 
-    GradientDrawable shape(int color, int r) {
-        GradientDrawable g = new GradientDrawable();
-        g.setColor(color);
-        g.setCornerRadius(dp(r));
-        return g;
-    }
+    GradientDrawable shape(int color, int r) { return Ui.shape(this, color, r, 0, 0); }
 
-    TextView label(LinearLayout p, String s) {
-        TextView t = new TextView(this);
-        t.setText(s);
-        t.setTextSize(11);
-        t.setTextColor(DIM);
+    TextView cap(String s) {
+        TextView t = Ui.text(this, s, 10.5f, DIM, false);
         t.setSingleLine(true);
-        t.setPadding(dp(4), dp(4), dp(4), dp(2));
-        p.addView(t);
+        t.setPadding(dp(2), 0, dp(2), dp(2));
         return t;
     }
 
@@ -82,7 +72,7 @@ public class MainActivity extends Activity {
         e.setTextColor(TXT);
         e.setHintTextColor(DIM);
         e.setTextSize(14);
-        e.setBackground(shape(CARD, 12));
+        e.setBackground(Ui.shape(this, Ui.CARD2, 12, 0, 0));
         e.setPadding(dp(12), 0, dp(12), 0);
         return e;
     }
@@ -93,36 +83,10 @@ public class MainActivity extends Activity {
         return l;
     }
 
-    EditText field(LinearLayout p, String lbl, String val, int type) {
-        label(p, lbl);
-        EditText e = box("", val, type);
-        p.addView(e, lp(-1, dp(40), 0, 0));
-        return e;
-    }
-
-    CheckBox check(LinearLayout p, String s, boolean v) {
-        CheckBox c = new CheckBox(this);
-        c.setText(s);
-        c.setChecked(v);
-        c.setTextColor(TXT);
-        c.setTextSize(13);
-        c.setButtonTintList(android.content.res.ColorStateList.valueOf(ACC2));
-        // جوه صف أفقي: بياخد نصيبه بالتساوي. جوه عمود رأسي: مفيش وزن (عشان ما ياخدش من مساحة الحالة)
-        p.addView(c, lp(-2, dp(36), p.getOrientation() == LinearLayout.HORIZONTAL ? 1 : 0, 0));
-        return c;
-    }
-
-    Button pill(String s, boolean on) {
-        Button b = new Button(this);
-        b.setText(s);
-        b.setAllCaps(false);
-        b.setTextColor(TXT);
-        b.setTextSize(13);
-        b.setMinHeight(0);
-        b.setMinimumHeight(0);
-        b.setBackground(shape(on ? ACC : CARD, 12));
-        b.setStateListAnimator(null);
-        return b;
+    LinearLayout.LayoutParams rowLp(int h, int top) {
+        LinearLayout.LayoutParams l = lp(-1, h, 0, 0);
+        l.topMargin = dp(top);
+        return l;
     }
 
     void setRes(String r) {
@@ -130,55 +94,74 @@ public class MainActivity extends Activity {
         qBtn.setText("1080".equals(resv) ? "1080 · عالية" : "720 · أسرع");
     }
 
-    /** مستوى صوت الموسيقى: 8 = قياسية • 15 = وسط • 25 = عالية (زر واحد بيلف عليهم). */
-    void setMvol(String v) {
-        mvolv = "15".equals(v) ? "15" : "25".equals(v) ? "25" : "8";
-        mvBtn.setText("🔊 " + ("15".equals(mvolv) ? "وسط" : "25".equals(mvolv) ? "عالية" : "قياسية"));
-    }
-
-    LinearLayout.LayoutParams rowLp(int h) {
-        LinearLayout.LayoutParams l = lp(-1, h, 0, 0);
-        l.topMargin = dp(4);
-        return l;
-    }
-
-    Button tiny(String s) {
-        Button b = pill(s, false);
-        b.setTextSize(12);
-        b.setSingleLine(true);
-        b.setEllipsize(TextUtils.TruncateAt.END);
-        b.setPadding(dp(2), 0, dp(2), 0);
-        return b;
-    }
-
-    /** بيحمّل القيم (الحالية، وإلا الافتراضي المحفوظ، وإلا الأصلي) في الخانات. */
     void loadFromPrefs() {
         count.setText(Feat.str(sp, "n", Feat.F_N));
         minL.setText(Feat.str(sp, "min", Feat.F_MIN));
         maxL.setText(Feat.str(sp, "max", Feat.F_MAX));
         setRes(Feat.str(sp, "res", Feat.F_RES));
         text.setText(Feat.str(sp, "text", Feat.F_TEXT));
-        reverse.setChecked(Feat.bool(sp, "rev", Feat.F_REV));
-        music.setChecked(Feat.bool(sp, "mus", Feat.F_MUS));
-        setMvol(Feat.str(sp, "mvol", Feat.F_MVOL));
-        musicUrl.setText(Feat.str(sp, "murl", Feat.F_MURL));
-        rsong.setChecked(Feat.bool(sp, "rsong", Feat.F_RSONG));
-        react.setChecked(Feat.bool(sp, "react", Feat.F_REACT));
     }
 
-    /** بيحفظ اللي على الشاشة كقيم حالية (عشان شاشة الخصائص تقدر تحفظها كافتراضي). */
     void saveCurrent() {
         sp.edit().putString("n", count.getText().toString().trim())
                 .putString("min", minL.getText().toString().trim())
                 .putString("max", maxL.getText().toString().trim())
                 .putString("res", resv)
-                .putString("text", text.getText().toString())
-                .putBoolean("rev", reverse.isChecked())
-                .putBoolean("mus", music.isChecked())
-                .putString("mvol", mvolv)
-                .putString("murl", musicUrl.getText().toString().trim())
-                .putBoolean("rsong", rsong.isChecked())
-                .putBoolean("react", react.isChecked()).apply();
+                .putString("text", text.getText().toString()).apply();
+    }
+
+    /** خانة حالة صغيرة فوق: قيمة + اسم. */
+    TextView statBox(LinearLayout row, String label) {
+        LinearLayout c = new LinearLayout(this);
+        c.setOrientation(LinearLayout.VERTICAL);
+        c.setGravity(Gravity.CENTER);
+        TextView v = Ui.text(this, "—", 13, TXT, true);
+        v.setSingleLine(true);
+        v.setEllipsize(TextUtils.TruncateAt.END);
+        v.setGravity(Gravity.CENTER);
+        TextView l = Ui.text(this, label, 9.5f, DIM, false);
+        l.setGravity(Gravity.CENTER);
+        c.addView(v);
+        c.addView(l);
+        row.addView(c, new LinearLayout.LayoutParams(0, -2, 1f));
+        return v;
+    }
+
+    /** مربع منصة نشر: أيقونة + اسم + حالة (شغّال/موقوف). */
+    TextView platTile(LinearLayout row, String icon, String name, final Class<?> cls) {
+        LinearLayout t = new LinearLayout(this);
+        t.setOrientation(LinearLayout.VERTICAL);
+        t.setGravity(Gravity.CENTER);
+        t.setPadding(dp(2), dp(6), dp(2), dp(6));
+        t.setBackground(Ui.shape(this, Ui.CARD, 14, Ui.STROKE, 1));
+        TextView ic = Ui.text(this, icon, 19, TXT, false);
+        ic.setGravity(Gravity.CENTER);
+        ic.setIncludeFontPadding(false);
+        TextView nm = Ui.text(this, name, 11.5f, TXT, true);
+        nm.setGravity(Gravity.CENTER);
+        nm.setSingleLine(true);
+        TextView st = Ui.text(this, "موقوف", 9.5f, DIM, false);
+        st.setGravity(Gravity.CENTER);
+        t.addView(ic);
+        t.addView(nm);
+        t.addView(st);
+        t.setOnClickListener(v -> startActivity(new Intent(this, cls)));
+        row.addView(t, lp(0, -2, 1, 3));
+        return st;
+    }
+
+    CharSequence credit() {
+        SpannableStringBuilder b = new SpannableStringBuilder();
+        b.append("صنع بكل حب  ·  ");
+        int s0 = b.length();
+        b.append("adel mohamed");
+        b.setSpan(new ForegroundColorSpan(Ui.ACC2), s0, b.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        b.setSpan(new StyleSpan(Typeface.BOLD), s0, b.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        b.append("  ");
+        int h0 = b.length();
+        b.append("❤");
+        b.setSpan(new ForegroundColorSpan(Ui.HEART), h0, b.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        return b;
     }
 
     @Override
@@ -186,9 +169,9 @@ public class MainActivity extends Activity {
         super.onCreate(b);
         sp = getSharedPreferences("reels", MODE_PRIVATE);
         if (!sp.contains("v4")) {
-            // مرة واحدة بس: الموسيقى بقت اختيارية ومقفولة من الأصل
             sp.edit().remove("mus").remove("d_mus").putBoolean("v4", true).apply();
         }
+        Feat.ensureInit(sp);
         getWindow().setStatusBarColor(BG);
         getWindow().setNavigationBarColor(BG);
 
@@ -196,20 +179,49 @@ public class MainActivity extends Activity {
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(BG);
         root.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
-        root.setPadding(dp(14), dp(8), dp(14), dp(8));
+        root.setPadding(dp(12), dp(8), dp(12), dp(8));
 
-        TextView title = new TextView(this);
-        title.setText("🎬 صانع الريلز");
-        title.setTextSize(20);
-        title.setTextColor(TXT);
-        title.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
-        title.setGravity(Gravity.CENTER);
-        root.addView(title);
+        // ───── الهيدر: الشعار + الاسم + «صنع بكل حب» + مساعدة ─────
+        LinearLayout hd = new LinearLayout(this);
+        hd.setGravity(Gravity.CENTER_VERTICAL);
+        hd.addView(new Ui.LogoView(this), new LinearLayout.LayoutParams(dp(44), dp(44)));
+        LinearLayout tt = new LinearLayout(this);
+        tt.setOrientation(LinearLayout.VERTICAL);
+        tt.setPadding(dp(10), 0, dp(10), 0);
+        tt.addView(Ui.text(this, "صانع الريلز", 20, TXT, true));
+        TextView cr = Ui.text(this, "", 11.5f, DIM, false);
+        cr.setText(credit());
+        cr.setSingleLine(true);
+        tt.addView(cr);
+        hd.addView(tt, new LinearLayout.LayoutParams(0, -2, 1f));
+        TextView help = Ui.text(this, "؟", 17, ACC, true);
+        help.setGravity(Gravity.CENTER);
+        help.setBackground(Ui.shape(this, Ui.CARD, 18, Ui.STROKE, 1));
+        help.setOnClickListener(v -> showHelp());
+        hd.addView(help, new LinearLayout.LayoutParams(dp(36), dp(36)));
+        root.addView(hd);
 
+        // ───── شريط الحالة العلوي: بيوريك الدنيا كلها (اضغط عليه للتفاصيل) ─────
+        LinearLayout strip = new LinearLayout(this);
+        strip.setGravity(Gravity.CENTER_VERTICAL);
+        strip.setPadding(dp(6), dp(6), dp(6), dp(6));
+        strip.setBackground(Ui.shape(this, Ui.CARD, 14, Ui.STROKE, 1));
+        stSvc = statBox(strip, "الخدمة");
+        stMode = statBox(strip, "الوضع");
+        stFeat = statBox(strip, "الخصائص");
+        stPub = statBox(strip, "النشر");
+        strip.setOnClickListener(v -> new android.app.AlertDialog.Builder(this)
+                .setTitle("📊 حالة كل حاجة").setMessage(Feat.summary(sp)).setPositiveButton("تمام", null).show());
+        root.addView(strip, rowLp(-2, 8));
+
+        // ───── كارت الرابط ─────
+        LinearLayout lc = Ui.card(this);
+        lc.addView(cap("🔗 رابط الفيديو — يوتيوب • تيك توك • فيسبوك • رابط مباشر"));
         LinearLayout lr = new LinearLayout(this);
-        link = box("🔗 الصق رابط الفيديو هنا — https://...", "", InputType.TYPE_TEXT_VARIATION_URI);
+        link = box("الصق الرابط هنا — https://...", "", InputType.TYPE_TEXT_VARIATION_URI);
         link.setTextSize(13);
-        Button paste = pill("لصق", true);
+        Button paste = Ui.pill(this, "📋 لصق", Ui.ACC);
+        paste.setTextColor(Color.WHITE);
         paste.setOnClickListener(v -> {
             ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
             if (cm != null && cm.hasPrimaryClip() && cm.getPrimaryClip().getItemCount() > 0) {
@@ -217,117 +229,103 @@ public class MainActivity extends Activity {
                 if (t != null) link.setText(t.toString().trim());
             }
         });
-        lr.addView(link, lp(0, dp(42), 1, 0));
-        lr.addView(paste, lp(dp(60), dp(42), 0, 0));
-        root.addView(lr, rowLp(-2));
+        lr.addView(link, lp(0, dp(42), 1, 2));
+        lr.addView(paste, lp(dp(74), dp(42), 0, 2));
+        lc.addView(lr);
+        root.addView(lc, rowLp(-2, 8));
 
-        // عدد + أقل + أقصى + الجودة: كلهم في صف واحد (الأسماء في الخانات نفسها)
+        // ───── كارت الإعدادات الأساسية ─────
+        LinearLayout sc = Ui.card(this);
         LinearLayout nr = new LinearLayout(this);
-        String[] hints = {"عدد", "أقل (ث)", "أقصى (ث)"};
+        String[] caps = {"عدد الريلز", "أقل مدة (ث)", "أقصى مدة (ث)", "الجودة"};
         EditText[] es = new EditText[3];
-        for (int i = 0; i < 3; i++) {
-            es[i] = box(hints[i], "", InputType.TYPE_CLASS_NUMBER);
-            es[i].setGravity(Gravity.CENTER);
-            es[i].setTextSize(13);
-            nr.addView(es[i], lp(0, dp(40), 1, 2));
+        for (int i = 0; i < 4; i++) {
+            LinearLayout col = new LinearLayout(this);
+            col.setOrientation(LinearLayout.VERTICAL);
+            col.addView(cap(caps[i]));
+            if (i < 3) {
+                es[i] = box("", "", InputType.TYPE_CLASS_NUMBER);
+                es[i].setGravity(Gravity.CENTER);
+                es[i].setTextSize(14);
+                col.addView(es[i], new LinearLayout.LayoutParams(-1, dp(40)));
+            } else {
+                qBtn = Ui.pill(this, "1080 · عالية", Ui.ACC);
+                qBtn.setTextColor(Color.WHITE);
+                qBtn.setTextSize(12);
+                qBtn.setSingleLine(true);
+                qBtn.setOnClickListener(v -> setRes("1080".equals(resv) ? "720" : "1080"));
+                col.addView(qBtn, new LinearLayout.LayoutParams(-1, dp(40)));
+            }
+            nr.addView(col, lp(0, -2, i == 3 ? 1.35f : 1f, 3));
         }
         count = es[0];
         minL = es[1];
         maxL = es[2];
-        qBtn = tiny("1080 · عالية");
-        qBtn.setBackground(shape(ACC, 12));
-        qBtn.setOnClickListener(v -> setRes("1080".equals(resv) ? "720" : "1080"));
-        nr.addView(qBtn, lp(0, dp(40), 1.3f, 2));
-        root.addView(nr, rowLp(-2));
-
-        text = box("النص العربي على الفيديو (سطر واحد)", "", InputType.TYPE_CLASS_TEXT);
+        sc.addView(nr);
+        TextView tc = cap("📝 نص عربي على الفيديو (اختياري) — شكله ومكانه من «استوديو برو»");
+        tc.setPadding(dp(2), dp(6), dp(2), dp(2));
+        sc.addView(tc);
+        text = box("اكتب سطر واحد يظهر على كل ريل", "", InputType.TYPE_CLASS_TEXT);
         text.setTextSize(13);
-        root.addView(text, rowLp(dp(40)));
+        sc.addView(text, new LinearLayout.LayoutParams(-1, dp(40)));
+        root.addView(sc, rowLp(-2, 8));
 
-        // الخيارات: صفّين من خيارين + الحقوق
-        LinearLayout cr = new LinearLayout(this);
-        reverse = check(cr, "عكس الفيديو", false);
-        music = check(cr, "موسيقى خلفية", false);
-        root.addView(cr);
+        // ───── الحقوق ─────
+        LinearLayout rr = Ui.toggleRow(this, "📜", "أؤكد أني أملك حقوق الفيديو أو مصرّح لي",
+                "لازم تعلّمها قبل ما تبدأ", false, (v, on) -> { });
+        rights = (Switch) rr.getTag();
+        rr.setPadding(dp(4), dp(2), dp(4), dp(2));
+        root.addView(rr, rowLp(-2, 4));
 
-        LinearLayout cr2 = new LinearLayout(this);
-        rsong = check(cr2, "🎶 أغاني تلقائي", true);
-        rsong.setOnClickListener(v -> toast(rsong.isChecked()
-                ? "لو الفيديو فيه أغنية، الموسيقى الأساسية هتشتغل مكانها تلقائيًا."
-                : "هيفضل صوت الفيديو الأصلي زي ما هو."));
-        react = check(cr2, "🎭 ريأكشن", false);
-        react.setOnClickListener(v -> toast(react.isChecked()
-                ? "تكبير بسيط + لمسة ألوان + سرعة 1.03. وده مش بيضمن تفادي أي مطالبة حقوق."
-                : "وضع الريأكشن اتقفل."));
-        root.addView(cr2);
+        // ───── استوديو برو + منصات النشر ─────
+        LinearLayout studio = new LinearLayout(this);
+        studio.setGravity(Gravity.CENTER_VERTICAL);
+        studio.setPadding(dp(12), dp(8), dp(12), dp(8));
+        GradientDrawable sg = new GradientDrawable(GradientDrawable.Orientation.RIGHT_LEFT, new int[]{0xFF1E5E63, 0xFF27406B});
+        sg.setCornerRadius(dp(16));
+        studio.setBackground(sg);
+        studio.addView(Ui.iconChip(this, "🎛️", 38, Color.WHITE));
+        LinearLayout sCol = new LinearLayout(this);
+        sCol.setOrientation(LinearLayout.VERTICAL);
+        sCol.setPadding(dp(10), 0, dp(6), 0);
+        sCol.addView(Ui.text(this, "استوديو برو", 15, Color.WHITE, true));
+        studioSub = Ui.text(this, "", 10.5f, 0xFFC5D6DC, false);
+        studioSub.setSingleLine(true);
+        studioSub.setEllipsize(TextUtils.TruncateAt.END);
+        sCol.addView(studioSub);
+        studio.addView(sCol, new LinearLayout.LayoutParams(0, -2, 1f));
+        studio.addView(Ui.text(this, "‹", 24, Color.WHITE, true));
+        studio.setOnClickListener(v -> startActivity(new Intent(this, StudioActivity.class)));
+        root.addView(studio, rowLp(-2, 8));
 
-        rights = check(root, "أؤكد أني أملك حقوق الفيديو أو مصرّح لي", false);
-
-        // الموسيقى في صف واحد: مستوى الصوت (ضغطة بتلف) + رابط/ملف (فاضي = المدمجة)
-        LinearLayout mr = new LinearLayout(this);
-        mvBtn = tiny("🔊 قياسية");
-        mvBtn.setOnClickListener(v -> setMvol("8".equals(mvolv) ? "15" : "15".equals(mvolv) ? "25" : "8"));
-        musicUrl = box("🎵 رابط موسيقى أو ملف (فاضي = المدمجة)", "", InputType.TYPE_TEXT_VARIATION_URI);
-        musicUrl.setTextSize(12);
-        pickMusic = tiny("📁 رفع");
-        pickMusic.setBackground(shape(ACC, 12));
-        pickMusic.setOnClickListener(v -> pickMusicFile());
-        mr.addView(mvBtn, lp(dp(84), dp(40), 0, 2));
-        mr.addView(musicUrl, lp(0, dp(40), 1, 2));
-        mr.addView(pickMusic, lp(dp(64), dp(40), 0, 2));
-        root.addView(mr, rowLp(-2));
-
-        // الخصائص + منصات النشر في صف واحد (✓ = مفعّل للنشر من السيرفر)
         LinearLayout pubRow = new LinearLayout(this);
-        feats = tiny("✨ الخصائص");
-        feats.setOnClickListener(v -> startActivity(new Intent(this, FeaturesActivity.class)));
-        ttBtn = tiny("🎵 تيك توك");
-        ttBtn.setOnClickListener(v -> startActivity(new Intent(this, TikTokActivity.class)));
-        fbBtn = tiny("📘 فيسبوك");
-        fbBtn.setOnClickListener(v -> startActivity(new Intent(this, FbActivity.class)));
-        igBtn = tiny("📷 إنستا");
-        igBtn.setOnClickListener(v -> startActivity(new Intent(this, IgActivity.class)));
-        pubRow.addView(feats, lp(0, dp(42), 1.25f, 2));
-        pubRow.addView(ttBtn, lp(0, dp(42), 1, 2));
-        pubRow.addView(fbBtn, lp(0, dp(42), 1, 2));
-        pubRow.addView(igBtn, lp(0, dp(42), 1, 2));
-        root.addView(pubRow, rowLp(-2));
+        ttSt = platTile(pubRow, "🎵", "تيك توك", TikTokActivity.class);
+        fbSt = platTile(pubRow, "📘", "فيسبوك", FbActivity.class);
+        igSt = platTile(pubRow, "📷", "إنستا", IgActivity.class);
+        xSt = platTile(pubRow, "𝕏", "إكس", XActivity.class);
+        root.addView(pubRow, rowLp(-2, 6));
 
-        // الاستوديو (فلاتر • لوجو • نص • صوت • فيديو تجريبي) + النشر على X
-        LinearLayout pubRow2 = new LinearLayout(this);
-        studioBtn = tiny("🎛️ الاستوديو");
-        studioBtn.setOnClickListener(v -> startActivity(new Intent(this, StudioActivity.class)));
-        xBtn = tiny("𝕏 إكس");
-        xBtn.setOnClickListener(v -> startActivity(new Intent(this, XActivity.class)));
-        pubRow2.addView(studioBtn, lp(0, dp(42), 1.25f, 2));
-        pubRow2.addView(xBtn, lp(0, dp(42), 1, 2));
-        root.addView(pubRow2, rowLp(-2));
-
+        // ───── زر البدء + التقدّم + الحالة ─────
         go = new Button(this);
         go.setText("ابدأ الآن ☁️");
         go.setAllCaps(false);
         go.setTextSize(17);
         go.setTextColor(Color.WHITE);
-        go.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        go.setTypeface(Typeface.DEFAULT_BOLD);
         go.setMinHeight(0);
         go.setMinimumHeight(0);
-        GradientDrawable gd = new GradientDrawable(GradientDrawable.Orientation.RIGHT_LEFT, new int[]{ACC, ACC2});
-        gd.setCornerRadius(dp(14));
+        GradientDrawable gd = new GradientDrawable(GradientDrawable.Orientation.RIGHT_LEFT, new int[]{0xFF2E9C93, 0xFF5B8DD9});
+        gd.setCornerRadius(dp(16));
         go.setBackground(gd);
         go.setStateListAnimator(null);
-        LinearLayout.LayoutParams gl = lp(-1, dp(48), 0, 0);
-        gl.topMargin = dp(6);
-        root.addView(go, gl);
+        root.addView(go, rowLp(dp(50), 8));
 
         bar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         bar.setIndeterminate(true);
-        bar.setIndeterminateTintList(android.content.res.ColorStateList.valueOf(ACC2));
+        bar.setIndeterminateTintList(android.content.res.ColorStateList.valueOf(ACC));
         bar.setVisibility(View.INVISIBLE);
-        LinearLayout.LayoutParams bp = lp(-1, dp(4), 0, 0);
-        bp.topMargin = dp(4);
-        root.addView(bar, bp);
+        root.addView(bar, rowLp(dp(4), 4));
 
-        // الحالة: بتاخد المساحة الباقية (مفيش تمرير). اضغط عليها تشوف الرسالة كاملة.
         status = new TextView(this);
         status.setTextColor(TXT);
         status.setTextSize(12);
@@ -335,28 +333,32 @@ public class MainActivity extends Activity {
         status.setMaxLines(5);
         status.setEllipsize(TextUtils.TruncateAt.END);
         status.setPadding(0, dp(4), 0, dp(4));
-        status.setText("جاهز. الصق الرابط والشغل كله على السيرفر ⏱ من 3 لـ 8 دقايق.");
+        status.setText("جاهز ✨ الصق الرابط واضغط «ابدأ». الشغل كله على السيرفر ⏱ من 3 لـ 8 دقايق.");
         status.setOnClickListener(v -> {
             CharSequence t = status.getText();
             if (t == null || t.length() == 0) return;
             new android.app.AlertDialog.Builder(this).setMessage(t).setPositiveButton("تمام", null).show();
         });
-        LinearLayout.LayoutParams stp = lp(-1, 0, 1, 0);
-        root.addView(status, stp);
+        root.addView(status, lp(-1, 0, 1, 0));
 
         LinearLayout br = new LinearLayout(this);
-        last = tiny("⬇️ نزّل آخر ملف");
-        battery = tiny("🔋 اسمح بالخلفية");
-        br.addView(last, lp(0, dp(38), 1, 2));
-        br.addView(battery, lp(0, dp(38), 1, 2));
+        last = Ui.pill(this, "⬇️ نزّل آخر ملف", Ui.CARD2);
+        last.setTextSize(12);
+        battery = Ui.pill(this, "🔋 اسمح بالخلفية", Ui.CARD2);
+        battery.setTextSize(12);
+        br.addView(last, lp(0, dp(38), 1, 3));
+        br.addView(battery, lp(0, dp(38), 1, 3));
         root.addView(br);
         battery.setOnClickListener(v -> askBattery());
 
         go.setOnClickListener(v -> start());
         last.setOnClickListener(v -> downloadLast());
-        // الصفحة بتفضل على شاشة واحدة؛ ولو الموبايل صغير والصف الإضافي مش مكفّي، بيتمرّر بدل ما الحالة تتقلّص
+
+        // الصفحة بتفضل ثابتة على شاشة واحدة؛ التمرير ده بس احتياطي لو الموبايل صغير جدًا (من غير أي أثر ارتداد)
         ScrollView sv = new ScrollView(this);
         sv.setFillViewport(true);
+        sv.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        sv.setVerticalScrollBarEnabled(false);
         sv.setBackgroundColor(BG);
         sv.addView(root);
         setContentView(sv);
@@ -370,10 +372,22 @@ public class MainActivity extends Activity {
         }
     }
 
+    void showHelp() {
+        new android.app.AlertDialog.Builder(this).setTitle("❓ إزاي أستخدم التطبيق؟")
+                .setMessage("1) الصق رابط الفيديو.\n"
+                        + "2) حدّد عدد الريلز وأقل/أقصى مدة للريل والجودة.\n"
+                        + "3) علّم على «أؤكد أني أملك الحقوق».\n"
+                        + "4) اضغط «ابدأ الآن» — السيرفر بيشتغل ومتابعتك بتكمّل حتى لو قفلت التطبيق.\n\n"
+                        + "🎛️ «استوديو برو»: كل الخصائص هناك — اللقطات الذكية (أكشن/كوميدي/حب ودراما)، الموسيقى والأغاني، عكس الفيديو، الريأكشن، الفلاتر، اللوجو، النص، الصوت. كل خاصية جنبها مفتاح تشغيل/إيقاف.\n\n"
+                        + "📤 المنصات (تيك توك/فيسبوك/إنستا/إكس): افتح المنصة وفعّل النشر التلقائي وضيف حساباتك.\n\n"
+                        + "📊 الشريط اللي فوق بيوريك حالة كل حاجة — اضغط عليه للتفاصيل.")
+                .setPositiveButton("تمام", null).show();
+    }
+
     @Override
     protected void onResume() {
         super.onResume();
-        loadFromPrefs();   // لو رجعت من شاشة الخصائص (حفظ/رجوع للافتراضي/الأصلية)
+        loadFromPrefs();
         sp.registerOnSharedPreferenceChangeListener(listener);
         if (sp.getBoolean("run_demo", false)) {    // الاستوديو طلب فيديو تجريبي
             sp.edit().putBoolean("run_demo", false).apply();
@@ -398,19 +412,36 @@ public class MainActivity extends Activity {
         return "NEW".equals(st) || "RUNNING".equals(st);
     }
 
+    void plat(TextView t, boolean on) {
+        t.setText(on ? "● شغّال" : "موقوف");
+        t.setTextColor(on ? Ui.OK : DIM);
+    }
+
     void render() {
         boolean run = isRunning();
         go.setEnabled(!run);
+        go.setAlpha(run ? 0.55f : 1f);
         last.setEnabled(!run);
         bar.setVisibility(run ? View.VISIBLE : View.INVISIBLE);
         String m = sp.getString("msg", "");
         if (!m.isEmpty()) status.setText(m);
-        feats.setText("✨ الخصائص (" + Feat.enabledCount(sp) + ")");
-        ttBtn.setText("🎵 تيك توك" + (sp.getBoolean("tt_server", false) ? " ✓" : ""));
-        fbBtn.setText("📘 فيسبوك" + (sp.getBoolean("fb_server", false) ? " ✓" : ""));
-        igBtn.setText("📷 إنستا" + (sp.getBoolean("ig_server", false) ? " ✓" : ""));
-        xBtn.setText("𝕏 إكس" + (sp.getBoolean("x_server", false) ? " ✓" : ""));
-        studioBtn.setText("🎛️ الاستوديو (" + ("custom".equals(Feat.str(sp, "a_mode", "best")) ? "مخصّص" : "best".equals(Feat.str(sp, "a_mode", "best")) ? "الأفضل" : "Pro") + ")");
+
+        boolean svc = !(Gh.TOK.isEmpty() || Gh.REPO.isEmpty());
+        stSvc.setText(svc ? (run ? "⏳ شغّال" : "✅ جاهز") : "⚠️ ناقص");
+        stSvc.setTextColor(svc ? Ui.OK : Ui.WARM);
+        stMode.setText(Feat.modeName(sp));
+        stFeat.setText(String.valueOf(Feat.enabledCount(sp)));
+        boolean tt = sp.getBoolean("tt_server", false), fb = sp.getBoolean("fb_server", false),
+                ig = sp.getBoolean("ig_server", false), x = sp.getBoolean("x_server", false);
+        int pubN = (tt ? 1 : 0) + (fb ? 1 : 0) + (ig ? 1 : 0) + (x ? 1 : 0);
+        stPub.setText(pubN == 0 ? "مقفول" : pubN + " منصات");
+        plat(ttSt, tt);
+        plat(fbSt, fb);
+        plat(igSt, ig);
+        plat(xSt, x);
+        String w = Feat.warnings(sp);
+        studioSub.setText("الوضع: " + Feat.modeName(sp) + (w.isEmpty() ? " • كل الخصائص هنا" : " • فيه تنبيه ⚠️"));
+
         boolean ignoring = true;
         if (Build.VERSION.SDK_INT >= 23) {
             PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
@@ -472,6 +503,7 @@ public class MainActivity extends Activity {
         minL.setText(String.valueOf(mn));
         maxL.setText(String.valueOf(mx));
         saveCurrent();
+        String fixed = Feat.fix(sp);   // تعارضات واضحة بتتصلّح لوحدها (مثلًا الوجوه محتاجة القص بالطول)
         final String job = java.util.UUID.randomUUID().toString().replace("-", "").substring(0, 12);
         final String body;
         try {
@@ -483,17 +515,17 @@ public class MainActivity extends Activity {
             in.put("min_l", String.valueOf(mn));
             in.put("max_l", String.valueOf(mx));
             in.put("res", resv);
-            in.put("reverse", String.valueOf(reverse.isChecked()));
+            in.put("reverse", String.valueOf(Feat.bool(sp, "rev", Feat.F_REV)));
             in.put("text", text.getText().toString());
-            in.put("music", String.valueOf(music.isChecked()));
-            in.put("mvol", mvolv);
-            in.put("music_url", musicUrl.getText().toString().trim());
-            in.put("rsong", String.valueOf(rsong.isChecked()));
-            in.put("react", String.valueOf(react.isChecked()));
+            in.put("music", String.valueOf(Feat.bool(sp, "mus", Feat.F_MUS)));
+            in.put("mvol", Feat.str(sp, "mvol", Feat.F_MVOL));
+            in.put("music_url", Feat.str(sp, "murl", Feat.F_MURL).trim());
+            in.put("rsong", String.valueOf(Feat.bool(sp, "rsong", Feat.F_RSONG)));
+            in.put("react", String.valueOf(Feat.bool(sp, "react", Feat.F_REACT)));
             in.put("feat", Feat.string(sp));
             boolean ttOn = !demo && sp.getBoolean("tt_server", false);
             if (ttOn && sp.getString("tt_accs", "[]").length() < 5) {
-                status.setText("فعّلت النشر على التك توك بس مفيش حسابات. أضفها من «🎵 النشر على التك توك».");
+                status.setText("فعّلت النشر على التك توك بس مفيش حسابات. أضفها من «🎵 تيك توك».");
                 return;
             }
             in.put("tiktok", String.valueOf(ttOn));
@@ -530,124 +562,14 @@ public class MainActivity extends Activity {
                 .putBoolean("job_nodl", (ttS || fbS || igS || xS) && (!ttS || sp.getBoolean("tt_nodl", false)) && (!fbS || sp.getBoolean("fb_nodl", false)) && (!igS || sp.getBoolean("ig_nodl", false)) && (!xS || sp.getBoolean("x_nodl", false)))
                 .putBoolean("job_tt", ttS).putBoolean("job_fb", fbS).putBoolean("job_ig", igS).putBoolean("job_x", xS)
                 .putBoolean("posted", false).putLong("t0", System.currentTimeMillis())
-                .putString("msg", "ببعت الطلب للسيرفر...").putInt("pct", 0).apply();
+                .putString("msg", fixed.isEmpty() ? "ببعت الطلب للسيرفر..." : "ببعت الطلب للسيرفر...\n" + fixed).putInt("pct", 0).apply();
         if (!demo) link.setText("");   // الرابط الجاي جديد؛ باقي الإعدادات زي ما هي
         startJobService();
         render();
     }
 
-    // ───────── رفع ملف موسيقى من الجهاز (بيترفع كملف إصدار على الريبو، ويتبعت رابطه للسيرفر) ─────────
     void toast(String t) {
         android.widget.Toast.makeText(this, t, android.widget.Toast.LENGTH_SHORT).show();
-    }
-
-    void pickMusicFile() {
-        if (noService()) return;
-        try {
-            Intent i = new Intent(Intent.ACTION_GET_CONTENT);
-            i.setType("audio/*");
-            i.addCategory(Intent.CATEGORY_OPENABLE);
-            startActivityForResult(Intent.createChooser(i, "اختار ملف موسيقى"), REQ_MUSIC);
-        } catch (Throwable e) {
-            status.setText("مفيش تطبيق ملفات يقدر يفتح الاختيار.");
-        }
-    }
-
-    @Override
-    protected void onActivityResult(int req, int res, Intent data) {
-        super.onActivityResult(req, res, data);
-        if (req == REQ_MUSIC && res == RESULT_OK && data != null && data.getData() != null) uploadMusic(data.getData());
-    }
-
-    void uploadMusic(final Uri uri) {
-        status.setText("⏳ برفع الموسيقى...");
-        pickMusic.setEnabled(false);
-        new Thread(() -> {
-            String url = null, err = null;
-            try {
-                url = doUpload(uri);
-            } catch (Throwable e) {
-                err = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
-            }
-            final String fu = url, fe = err;
-            runOnUiThread(() -> {
-                pickMusic.setEnabled(true);
-                if (fu != null) {
-                    musicUrl.setText(fu);
-                    saveCurrent();
-                    status.setText("✅ اترفعت الموسيقى. هتتستخدم في الريل الجاي.");
-                } else {
-                    status.setText("❌ فشل رفع الموسيقى: " + fe + "\nتقدر تلزق رابط مباشر بدل الرفع.");
-                }
-            });
-        }).start();
-    }
-
-    String doUpload(Uri uri) throws Exception {
-        String name = "music.mp3";
-        long size = -1;
-        try (android.database.Cursor c = getContentResolver().query(uri, null, null, null, null)) {
-            if (c != null && c.moveToFirst()) {
-                int ni = c.getColumnIndex(OpenableColumns.DISPLAY_NAME), si = c.getColumnIndex(OpenableColumns.SIZE);
-                if (ni >= 0 && c.getString(ni) != null) name = c.getString(ni);
-                if (si >= 0 && !c.isNull(si)) size = c.getLong(si);
-            }
-        } catch (Throwable ignored) { }
-        if (size > 25L * 1024 * 1024) throw new Exception("الملف أكبر من 25 م.ب");
-        String ext = name.contains(".") ? name.substring(name.lastIndexOf('.') + 1).toLowerCase() : "mp3";
-        if (!ext.matches("mp3|m4a|aac|wav|ogg|oga|opus|flac")) ext = "mp3";
-        ByteArrayOutputStream bo = new ByteArrayOutputStream();
-        try (InputStream in = getContentResolver().openInputStream(uri)) {
-            if (in == null) throw new Exception("تعذّرت قراءة الملف");
-            byte[] buf = new byte[1 << 16];
-            int n;
-            while ((n = in.read(buf)) > 0) {
-                bo.write(buf, 0, n);
-                if (bo.size() > 25 * 1024 * 1024) throw new Exception("الملف أكبر من 25 م.ب");
-            }
-        }
-        byte[] data = bo.toByteArray();
-        if (data.length < 2048) throw new Exception("الملف فاضي أو صغير جدًا");
-
-        // امسح موسيقى اتـرفعت قبل كده (عشان الريبو ما يتملاش)
-        String old = sp.getString("music_tag", "");
-        if (!old.isEmpty()) {
-            try {
-                String[] r = Gh.http("GET", Gh.API + "/repos/" + Gh.REPO + "/releases/tags/" + old, null);
-                if (r[0].startsWith("2")) {
-                    Gh.http("DELETE", Gh.API + "/repos/" + Gh.REPO + "/releases/" + new JSONObject(r[1]).getLong("id"), null);
-                }
-                Gh.http("DELETE", Gh.API + "/repos/" + Gh.REPO + "/git/refs/tags/" + old, null);
-            } catch (Throwable ignored) { }
-        }
-        String tag = "music-" + java.util.UUID.randomUUID().toString().replace("-", "").substring(0, 10);
-        String body = new JSONObject().put("tag_name", tag).put("name", "music").put("body", "music").put("prerelease", true).toString();
-        String[] cr = Gh.http("POST", Gh.API + "/repos/" + Gh.REPO + "/releases", body);
-        int code = Integer.parseInt(cr[0]);
-        if (code == 401 || code == 403 || code == 404) throw new Exception("التوكن مالوش صلاحية رفع ملفات على الريبو (محتاج Contents: write)");
-        if (code < 200 || code >= 300) throw new Exception("خطأ " + code);
-        long rid = new JSONObject(cr[1]).getLong("id");
-
-        String mime = "wav".equals(ext) ? "audio/wav" : "ogg".equals(ext) || "oga".equals(ext) || "opus".equals(ext) ? "audio/ogg"
-                : "m4a".equals(ext) || "aac".equals(ext) ? "audio/mp4" : "flac".equals(ext) ? "audio/flac" : "audio/mpeg";
-        String aname = "music." + ext;
-        HttpURLConnection c = Gh.open("POST", "https://uploads.github.com/repos/" + Gh.REPO + "/releases/" + rid + "/assets?name="
-                + URLEncoder.encode(aname, "UTF-8"), true);
-        try {
-            c.setReadTimeout(120000);
-            c.setDoOutput(true);
-            c.setRequestProperty("Content-Type", mime);
-            c.setFixedLengthStreamingMode(data.length);
-            try (OutputStream o = c.getOutputStream()) {
-                o.write(data);
-            }
-            int rc = c.getResponseCode();
-            if (rc < 200 || rc >= 300) throw new Exception("خطأ رفع " + rc);
-        } finally {
-            c.disconnect();
-        }
-        sp.edit().putString("music_tag", tag).apply();
-        return "https://github.com/" + Gh.REPO + "/releases/download/" + tag + "/" + aname;
     }
 
     void downloadLast() {

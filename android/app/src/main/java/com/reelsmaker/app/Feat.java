@@ -35,7 +35,7 @@ final class Feat {
     // ───── خصائص v5 (الاستوديو): الوضع • الفلاتر • اللوجو • النص • الصوت ─────
     // a_mode: best (الأفضل — الافتراضي) / pro / custom (أنا أختار)
     static final String[] ADV_STR = {"a_mode", "a_look", "a_look_i", "a_extras", "a_logo_url", "a_logo_pos", "a_logo_size",
-            "a_logo_op", "a_tpos", "a_tstyle", "a_tsize", "a_tfont", "a_tcolor", "a_tanim", "a_cred", "a_target", "a_vol"};
+            "a_logo_op", "a_tpos", "a_tstyle", "a_tsize", "a_tfont", "a_tcolor", "a_tanim", "a_cred", "a_target", "a_vol", "a_moments"};
     static final String[] ADV_BOOL = {"a_progress", "a_zoom", "a_voice", "a_comp", "a_bass", "a_treble", "a_duck", "a_loud",
             "a_denoise", "a_ledger"};
 
@@ -65,6 +65,7 @@ final class Feat {
             case "a_tanim": return "none";
             case "a_target": return "std";
             case "a_vol": return "100";
+            case "a_moments": return "all";
             default: return "";
         }
     }
@@ -78,7 +79,8 @@ final class Feat {
         try {
             JSONObject o = new JSONObject();
             String mode = str(sp, "a_mode", advDef("a_mode"));
-            o.put("mode", "custom".equals(mode) ? "" : mode);
+            o.put("mode", "");   // v6: كل مفتاح في استوديو برو هو الحقيقة الوحيدة (الوضع الجاهز بيتطبّق على المفاتيح نفسها)
+            o.put("moments", str(sp, "a_moments", advDef("a_moments")));
             o.put("look", str(sp, "a_look", advDef("a_look")));
             o.put("look_i", str(sp, "a_look_i", advDef("a_look_i")));
             o.put("extras", str(sp, "a_extras", ""));
@@ -109,6 +111,100 @@ final class Feat {
         } catch (Exception e) {
             return "{}";
         }
+    }
+
+
+    // ═════════ v6: تناسق تام بين كل الخصائص ═════════
+    static final String[] MOMENT_ID = {"all", "action", "funny", "emotion"};
+    static final String[] MOMENT_NAME = {"الكل", "أكشن", "كوميدي", "حب ودراما"};
+
+    static String modeName(SharedPreferences sp) {
+        String m = str(sp, "a_mode", "best");
+        return "pro".equals(m) ? "Pro" : "custom".equals(m) ? "مخصّص" : "الأفضل";
+    }
+
+    /** بيطبّق الوضع الجاهز (الأفضل/Pro) على المفاتيح نفسها — فمفيش «تناقض» بين الوضع والمفاتيح. */
+    static void applyMode(SharedPreferences sp, String mode) {
+        boolean pro = "pro".equals(mode);
+        if (!pro && !"best".equals(mode)) {
+            sp.edit().putString("a_mode", "custom").apply();
+            return;
+        }
+        SharedPreferences.Editor e = sp.edit();
+        e.putString("a_mode", mode);
+        for (int i = 0; i < ID.length; i++) {
+            if (!"musicfile".equals(ID[i])) e.putBoolean("f_" + ID[i], true);
+        }
+        e.putString("a_look", pro ? "golden" : "cinematic");
+        e.putString("a_look_i", pro ? "55" : "45");
+        e.putString("a_extras", pro ? "clarity,vignette,grain" : "sharp,vignette");
+        e.putBoolean("a_voice", true).putBoolean("a_loud", true).putBoolean("a_denoise", true)
+                .putBoolean("a_duck", true).putBoolean("a_bass", false)
+                .putBoolean("a_progress", true).putBoolean("a_zoom", pro);
+        e.putString("a_target", pro ? "loud" : "std");
+        if ("none".equals(str(sp, "a_tanim", "none"))) e.putString("a_tanim", pro ? "slide" : "fade");
+        e.apply();
+    }
+
+    /** مرة واحدة بس بعد التحديث: لو الوضع «الأفضل/Pro» بنطبّقه على المفاتيح عشان تبان صح. */
+    static void ensureInit(SharedPreferences sp) {
+        if (sp.getBoolean("v6", false)) return;
+        applyMode(sp, str(sp, "a_mode", "best"));
+        sp.edit().putBoolean("v6", true).apply();
+    }
+
+    /** رجوع كامل للأصلي (الوضع «الأفضل» مطبّق). */
+    static void resetAll(SharedPreferences sp) {
+        factory(sp);
+        applyMode(sp, "best");
+    }
+
+    /** بيصلّح التعارضات الواضحة تلقائيًا وبيرجّع ملاحظة (أو فاضي). */
+    static String fix(SharedPreferences sp) {
+        StringBuilder n = new StringBuilder();
+        if (get(sp, FACE) && !get(sp, CROP)) {
+            sp.edit().putBoolean("f_crop", true).apply();
+            n.append("فعّلت «قص بالطول» لأن «تتبّع الوجوه» بيشتغل معاه بس.\n");
+        }
+        return n.toString().trim();
+    }
+
+    /** تنبيهات (من غير تغيير) على إعدادات ممكن تدّي نتيجة مش متوقّعة. */
+    static String warnings(SharedPreferences sp) {
+        StringBuilder n = new StringBuilder();
+        boolean orig = get(sp, 4), mus = bool(sp, "mus", F_MUS), rs = bool(sp, "rsong", F_RSONG);
+        if (!orig && !mus && !get(sp, 7)) n.append("⚠️ صوت الفيديو مقفول ومفيش موسيقى — الريل هيطلع صامت.\n");
+        if (bool(sp, "rev", F_REV) && orig) n.append("ℹ️ «عكس الفيديو» بيعكس صوت الفيديو كمان — الأحسن تشغّل موسيقى خلفية معاه.\n");
+        if (rs && !mus && !get(sp, 7)) n.append("ℹ️ «أغاني الفيديو الأساسية» بتبدّل الأغنية بالموسيقى المدمجة لما تلاقي أغنية في الفيديو.\n");
+        return n.toString().trim();
+    }
+
+    /** ملخص كامل لكل اللي شغّال (بيظهر في شريط الحالة فوق). */
+    static String summary(SharedPreferences sp) {
+        StringBuilder s = new StringBuilder();
+        s.append("🏆 الوضع: ").append(modeName(sp)).append("\n");
+        StringBuilder f = new StringBuilder();
+        for (int i = 0; i < ID.length; i++) {
+            if (get(sp, i)) f.append(f.length() > 0 ? "، " : "").append(NAME[i]);
+        }
+        s.append("✨ الخصائص: ").append(f.length() == 0 ? "ولا واحدة" : f).append("\n");
+        String mom = "الكل";
+        String mid = str(sp, "a_moments", "all");
+        for (int i = 0; i < MOMENT_ID.length; i++) if (MOMENT_ID[i].equals(mid)) mom = MOMENT_NAME[i];
+        s.append("🎯 نوع اللقطات: ").append(mom).append("\n");
+        s.append("🎵 موسيقى الخلفية: ").append(bool(sp, "mus", F_MUS) ? "شغّالة" : "مقفولة").append("\n");
+        s.append("🎶 أغاني الفيديو الأساسية: ").append(bool(sp, "rsong", F_RSONG) ? "شغّالة" : "مقفولة").append("\n");
+        s.append("🔁 عكس الفيديو: ").append(bool(sp, "rev", F_REV) ? "شغّال" : "مقفول").append("\n");
+        s.append("🎭 الريأكشن: ").append(bool(sp, "react", F_REACT) ? "شغّال" : "مقفول").append("\n");
+        StringBuilder pub = new StringBuilder();
+        if (sp.getBoolean("tt_server", false)) pub.append(" تيك توك");
+        if (sp.getBoolean("fb_server", false)) pub.append(" فيسبوك");
+        if (sp.getBoolean("ig_server", false)) pub.append(" إنستا");
+        if (sp.getBoolean("x_server", false)) pub.append(" X");
+        s.append("📤 النشر التلقائي:").append(pub.length() == 0 ? " مقفول" : pub);
+        String w = warnings(sp);
+        if (!w.isEmpty()) s.append("\n\n").append(w);
+        return s.toString();
     }
 
     private Feat() { }

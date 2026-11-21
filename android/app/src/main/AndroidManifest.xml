@@ -11,6 +11,8 @@
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
     <application
         android:label="صانع الريلز"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.DeviceDefault.Light.NoActionBar">
         <activity android:name=".MainActivity" android:exported="true"
@@ -22,8 +24,6 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        <activity android:name=".FeaturesActivity" android:exported="false"
-            android:screenOrientation="portrait" />
         <activity android:name=".TikTokActivity" android:exported="false"
             android:screenOrientation="portrait" />
         <activity android:name=".FbActivity" android:exported="false"
