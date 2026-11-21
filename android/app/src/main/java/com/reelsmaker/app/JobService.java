@@ -197,6 +197,7 @@ public class JobService extends Service {
     /** بيعيد المحاولة مع انتظار متزايد لو النت فصل أو السيرفر مشغول؛ الأخطاء النهائية بتطلع. */
     <T> T retry(Net<T> f) throws Exception {
         long wait = 3000;
+        int odd = 0;
         while (true) {
             if (stopping) throw new InterruptedException();
             try {
@@ -206,7 +207,17 @@ public class JobService extends Service {
             } catch (InterruptedException e) {
                 throw e;
             } catch (Exception e) {
-                status("📶 مفيش اتصال حاليًا — الشغل مكمّل على السيرفر، وهكمّل أول ما النت يرجع");
+                if (e instanceof java.io.IOException) {
+                    odd = 0;
+                    status("📶 مفيش اتصال حاليًا — الشغل مكمّل على السيرفر، وهكمّل أول ما النت يرجع");
+                } else if (e instanceof Gh.Transient) {
+                    odd = 0;
+                    status("⏳ GitHub مشغول (" + e.getMessage() + ") — بعيد المحاولة...");
+                } else {
+                    // خطأ مش نت ومش مؤقت (مثلاً رد غريب): مانفضلش نعيد للأبد ونخبّي السبب
+                    if (++odd >= 4) throw new Gh.Fatal("خطأ غير متوقع: " + e.getClass().getSimpleName() + " " + String.valueOf(e.getMessage()));
+                    status("⚠️ خطأ مؤقت (" + e.getClass().getSimpleName() + ") — بعيد المحاولة...");
+                }
                 Thread.sleep(wait);
                 wait = Math.min(wait * 2, 30000);
             }

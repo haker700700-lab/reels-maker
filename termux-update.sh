@@ -74,9 +74,13 @@ gh api -X PUT "repos/$REPO/actions/permissions/workflow" -f default_workflow_per
 
 # 5) مفتاح التطبيق: بيتحفظ على موبايلك ويتفحص كل مرة. لو اتمسح أو انتهى من GitHub بيطلب واحد جديد لوحده.
 KF="$HOME/.reels-app-token"
-tok_ok() { # $1 = توكن
-  [ -n "$1" ] && [ "$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $1" \
-    -H "Accept: application/vnd.github+json" "https://api.github.com/repos/$REPO/actions/workflows" || true)" = "200" ]
+tok_ok() { # $1 = توكن: لازم يقدر يقرا ويكتب على Actions (الكتابة بنجرّبها بـ ref وهمي: 422 = مسموح، 403 = ناقص صلاحية، ومابيشغّلش حاجة)
+  [ -n "$1" ] || return 1
+  [ "$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $1" \
+    -H "Accept: application/vnd.github+json" "https://api.github.com/repos/$REPO/actions/workflows" || true)" = "200" ] || return 1
+  W=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $1" -H "Accept: application/vnd.github+json" \
+    "https://api.github.com/repos/$REPO/actions/workflows/reels.yml/dispatches" -d '{"ref":"__probe__"}' || true)
+  [ "$W" = "422" ] || [ "$W" = "404" ]
 }
 TOKEN=""
 [ -f "$KF" ] && [ "${RESET_TOKEN:-0}" != 1 ] && TOKEN=$(cat "$KF")
@@ -96,7 +100,7 @@ else
     printf "الصق التوكن هنا (مش هيظهر وإنت بتلصق) ثم Enter: "
     read -rs TOKEN; echo
     tok_ok "$TOKEN" && break
-    echo "❌ التوكن مش شغّال. اتأكد من الصلاحيتين ومن اختيار reels-maker."
+    echo "❌ التوكن مش شغّال أو ناقصه صلاحية الكتابة. لازم: Repository access ← reels-maker، و Permissions ← Actions: Read and write (مش Read بس)."
     TOKEN=""
   done
   [ -n "$TOKEN" ] || die "وقفنا. اعمل التوكن صح وشغّل الأمر تاني."
@@ -156,9 +160,9 @@ fi
 
 gh release download apk-latest -R "$REPO" -p ReelsMaker.apk -D "$D" --clobber >/dev/null 2>&1 || die "فشل تنزيل الـ APK."
 SZ=$(stat -c %s "$D/ReelsMaker.apk" 2>/dev/null || echo 0)
-[ "$SZ" -gt 100000 ] || die "ملف الـ APK ناقص أو تالف."
+[ "$SZ" -gt 20000 ] || die "ملف الـ APK ناقص أو تالف (حجمه $SZ بايت). شغّل الأمر تاني."
 echo
-echo "✅ خلصنا في $(( ($(date +%s) - START) / 60 )) دقيقة. التطبيق جاهز في التنزيلات: ReelsMaker.apk ($((SZ/1048576)) MB)"
+echo "✅ خلصنا في $(( ($(date +%s) - START) / 60 )) دقيقة. التطبيق جاهز في التنزيلات: ReelsMaker.apk ($((SZ/1024)) KB)"
 echo "📲 ثبّته فوق النسخة القديمة (نفس التوقيع، فهيتحدّث من غير ما يمسح حاجة)."
 echo "🔋 أول مرة افتح التطبيق: اسمح بالإشعارات واضغط «اسمح للتطبيق يشتغل في الخلفية»."
 termux-open "$D/ReelsMaker.apk" || true

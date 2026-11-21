@@ -70,7 +70,15 @@ final class Gh {
         }
     }
 
-    /** بيفحص كود الرد: 2xx تمام، أخطاء الحساب نهائية، الباقي مؤقت. */
+    static String msgOf(String body) {
+        try {
+            return new JSONObject(body).optString("message", "").trim();
+        } catch (Exception e) {
+            return body == null ? "" : body.replace('\n', ' ').trim();
+        }
+    }
+
+    /** بيفحص كود الرد: 2xx تمام، أخطاء الحساب/الصلاحيات نهائية وبتظهر بسببها الحقيقي، الباقي مؤقت. */
     static void check(String[] x) throws Fatal, Transient {
         int code;
         try {
@@ -79,10 +87,17 @@ final class Gh {
             throw new Transient("bad code");
         }
         if (code >= 200 && code < 300) return;
-        if (code == 401) throw new Fatal("الخدمة مش متاحة حاليًا (التوكن منتهي). كلّم صاحب التطبيق.");
-        if (code == 404) throw new Fatal("الخدمة مش موجودة (المستودع أو الملف).");
-        if (code == 403 || code == 429 || code >= 500 || code == 408) throw new Transient("busy " + code);
-        throw new Fatal("خطأ " + code + ": " + x[1].replace('\n', ' '));
+        String m = msgOf(x[1]);
+        if (code == 401) throw new Fatal("GitHub مش قابل التوكن (منتهي أو اتلغى). شغّل أمر التحديث وهيعمل توكن جديد: RESET_TOKEN=1 bash ~/reels-maker-main/termux-update.sh");
+        if (code == 403) {
+            String l = m.toLowerCase();
+            if (l.contains("rate limit") || l.contains("abuse")) throw new Transient("busy 403 " + m);
+            throw new Fatal("GitHub رفض الطلب (403): " + m + " — التوكن ناقصه صلاحية «Actions: Read and write» أو مش مختار مستودع reels-maker. "
+                    + "اعمل توكن جديد: RESET_TOKEN=1 bash ~/reels-maker-main/termux-update.sh");
+        }
+        if (code == 404) throw new Fatal("مش لاقي الخدمة (404): " + m + " — اتأكد إن المستودع " + REPO + " وملف reels.yml موجودين، وإن التوكن مختار المستودع ده.");
+        if (code == 429 || code >= 500 || code == 408) throw new Transient("busy " + code);
+        throw new Fatal("خطأ " + code + ": " + m);
     }
 
     /** بيدوّر على تشغيل بنفس رقم العملية بتاعنا (كل عملية ليها رقم مختلف، فمفيش خلط). 0 = لسه ما ظهرش. */
